@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+files=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.go$' || true)
+if [ -z "$files" ]; then
+    exit 0
+fi
+
+unformatted=$(gofmt -l $files)
+if [ -n "$unformatted" ]; then
+    echo "gofmt: the following files are not formatted:"
+    echo "$unformatted" | sed 's/^/  /'
+    echo
+    echo "Run: gofmt -w ."
+    exit 1
+fi

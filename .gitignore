@@ -1,0 +1,7 @@
+/dharma
+/dharma-cli
+*.test
+*.out
+.env
+.envrc
+dist/
