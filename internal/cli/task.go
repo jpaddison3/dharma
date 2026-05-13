@@ -17,6 +17,7 @@ var taskCmd = &cobra.Command{
 var (
 	taskListAssignee string
 	taskListProject  string
+	taskListSection  string
 	taskListLimit    int
 	taskListFields   string
 	taskListPaginate bool
@@ -24,7 +25,7 @@ var (
 
 var taskListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List tasks (requires --project, or --assignee with --workspace)",
+	Short: "List tasks (requires --section, --project, or --assignee with --workspace)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
 		if err != nil {
@@ -32,6 +33,8 @@ var taskListCmd = &cobra.Command{
 		}
 		q := url.Values{}
 		switch {
+		case taskListSection != "":
+			q.Set("section", taskListSection)
 		case taskListProject != "":
 			q.Set("project", taskListProject)
 		case taskListAssignee != "":
@@ -42,7 +45,7 @@ var taskListCmd = &cobra.Command{
 			q.Set("workspace", ws)
 			q.Set("assignee", taskListAssignee)
 		default:
-			return fmt.Errorf("provide --project or --assignee")
+			return fmt.Errorf("provide --section, --project, or --assignee")
 		}
 		if taskListLimit > 0 {
 			q.Set("limit", strconv.Itoa(taskListLimit))
@@ -145,9 +148,71 @@ var taskMoveCmd = &cobra.Command{
 	},
 }
 
+var (
+	taskAddToProjectProject string
+	taskAddToProjectSection string
+)
+
+var taskAddToProjectCmd = &cobra.Command{
+	Use:   "add-to-project <gid>",
+	Short: "Add a task to a project (multi-home), optionally placing it in a section",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if taskAddToProjectProject == "" {
+			return fmt.Errorf("--project is required")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		body := map[string]interface{}{"project": taskAddToProjectProject}
+		if taskAddToProjectSection != "" {
+			body["section"] = taskAddToProjectSection
+		}
+		return runPost(context.Background(), c, "/tasks/"+args[0]+"/addProject", body)
+	},
+}
+
+var taskRemoveFromProjectProject string
+
+var taskRemoveFromProjectCmd = &cobra.Command{
+	Use:   "remove-from-project <gid>",
+	Short: "Remove a task from a project",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if taskRemoveFromProjectProject == "" {
+			return fmt.Errorf("--project is required")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		return runPost(context.Background(), c, "/tasks/"+args[0]+"/removeProject", map[string]interface{}{"project": taskRemoveFromProjectProject})
+	},
+}
+
+var taskAddTagTag string
+
+var taskAddTagCmd = &cobra.Command{
+	Use:   "add-tag <gid>",
+	Short: "Add a tag to a task",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if taskAddTagTag == "" {
+			return fmt.Errorf("--tag is required (a tag gid)")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		return runPost(context.Background(), c, "/tasks/"+args[0]+"/addTag", map[string]interface{}{"tag": taskAddTagTag})
+	},
+}
+
 func init() {
 	taskListCmd.Flags().StringVar(&taskListAssignee, "assignee", "", "assignee gid (use 'me' for self)")
 	taskListCmd.Flags().StringVar(&taskListProject, "project", "", "project gid")
+	taskListCmd.Flags().StringVar(&taskListSection, "section", "", "section gid")
 	taskListCmd.Flags().IntVar(&taskListLimit, "limit", 0, "max items per page (server default if 0)")
 	taskListCmd.Flags().StringVar(&taskListFields, "fields", "", "opt_fields, e.g. name,assignee.name")
 	taskListCmd.Flags().BoolVar(&taskListPaginate, "paginate", false, "fetch all pages")
@@ -163,5 +228,12 @@ func init() {
 
 	taskMoveCmd.Flags().StringVar(&taskMoveSection, "section", "", "destination section gid")
 
-	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd)
+	taskAddToProjectCmd.Flags().StringVar(&taskAddToProjectProject, "project", "", "project gid (required)")
+	taskAddToProjectCmd.Flags().StringVar(&taskAddToProjectSection, "section", "", "section gid within the project (optional)")
+
+	taskRemoveFromProjectCmd.Flags().StringVar(&taskRemoveFromProjectProject, "project", "", "project gid (required)")
+
+	taskAddTagCmd.Flags().StringVar(&taskAddTagTag, "tag", "", "tag gid (required)")
+
+	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd)
 }
