@@ -151,7 +151,7 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values, out int
 	if err != nil {
 		return err
 	}
-	if out == nil {
+	if out == nil || len(resp.Data) == 0 {
 		return nil
 	}
 	return json.Unmarshal(resp.Data, out)
@@ -162,7 +162,7 @@ func (c *Client) Post(ctx context.Context, path string, body, out interface{}) e
 	if err != nil {
 		return err
 	}
-	if out == nil {
+	if out == nil || len(resp.Data) == 0 {
 		return nil
 	}
 	return json.Unmarshal(resp.Data, out)

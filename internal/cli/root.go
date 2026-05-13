@@ -26,7 +26,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagWorkspace, "workspace", "", "workspace gid (env: ASANA_WORKSPACE)")
 	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "log HTTP requests to stderr")
 
-	rootCmd.AddCommand(authCmd, apiCmd, userCmd, taskCmd, projectCmd, workspaceCmd)
+	rootCmd.AddCommand(authCmd, apiCmd, userCmd, taskCmd, myTasksCmd, projectCmd, workspaceCmd)
 }
 
 func Execute() {

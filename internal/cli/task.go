@@ -109,6 +109,42 @@ var taskCreateCmd = &cobra.Command{
 	},
 }
 
+var taskCommentText string
+
+var taskCommentCmd = &cobra.Command{
+	Use:   "comment <gid>",
+	Short: "Add a comment (story) to a task",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if taskCommentText == "" {
+			return fmt.Errorf("--text is required")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		return runPost(context.Background(), c, "/tasks/"+args[0]+"/stories", map[string]interface{}{"text": taskCommentText})
+	},
+}
+
+var taskMoveSection string
+
+var taskMoveCmd = &cobra.Command{
+	Use:   "move <gid>",
+	Short: "Move a task into a section (within whichever project that section belongs to)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if taskMoveSection == "" {
+			return fmt.Errorf("--section is required (a section gid)")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		return runPost(context.Background(), c, "/sections/"+taskMoveSection+"/addTask", map[string]interface{}{"task": args[0]})
+	},
+}
+
 func init() {
 	taskListCmd.Flags().StringVar(&taskListAssignee, "assignee", "", "assignee gid (use 'me' for self)")
 	taskListCmd.Flags().StringVar(&taskListProject, "project", "", "project gid")
@@ -123,5 +159,9 @@ func init() {
 	taskCreateCmd.Flags().StringVar(&taskCreateNotes, "notes", "", "task description")
 	taskCreateCmd.Flags().StringVar(&taskCreateAssignee, "assignee", "", "assignee gid")
 
-	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd)
+	taskCommentCmd.Flags().StringVar(&taskCommentText, "text", "", "comment text (URLs are auto-linked by Asana)")
+
+	taskMoveCmd.Flags().StringVar(&taskMoveSection, "section", "", "destination section gid")
+
+	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd)
 }
