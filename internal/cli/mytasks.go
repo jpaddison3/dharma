@@ -26,7 +26,7 @@ var (
 
 var myTasksListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List tasks in your My Tasks; --section filters to a named section like \"Main work\"",
+	Short: "List tasks in your My Tasks; --section filters to a named section like \"Main Work\"",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
 		if err != nil {
@@ -108,7 +108,7 @@ func resolveMyTasksSection(ctx context.Context, c *client.Client, workspace, nam
 }
 
 func init() {
-	myTasksListCmd.Flags().StringVar(&myTasksListSection, "section", "", "section name (e.g. \"Main work\"); omit for all My Tasks")
+	myTasksListCmd.Flags().StringVar(&myTasksListSection, "section", "", "section name (e.g. \"Main Work\"); omit for all My Tasks")
 	myTasksListCmd.Flags().StringVar(&myTasksListFields, "fields", "", "opt_fields, e.g. name,assignee.name,due_on")
 	myTasksListCmd.Flags().IntVar(&myTasksListLimit, "limit", 0, "max items per page (server default if 0)")
 	myTasksListCmd.Flags().BoolVar(&myTasksListPaginate, "paginate", false, "fetch all pages")

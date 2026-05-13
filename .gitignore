@@ -1,5 +1,6 @@
 /dharma
 /dharma-cli
+/notes/
 *.test
 *.out
 .env
