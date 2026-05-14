@@ -209,6 +209,37 @@ var taskAddTagCmd = &cobra.Command{
 	},
 }
 
+var taskRenameName string
+
+var taskRenameCmd = &cobra.Command{
+	Use:   "rename <gid>",
+	Short: "Rename a task",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if taskRenameName == "" {
+			return fmt.Errorf("--name is required")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		return runPut(context.Background(), c, "/tasks/"+args[0], map[string]interface{}{"name": taskRenameName})
+	},
+}
+
+var taskCompleteCmd = &cobra.Command{
+	Use:   "complete <gid>",
+	Short: "Mark a task complete",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		return runPut(context.Background(), c, "/tasks/"+args[0], map[string]interface{}{"completed": true})
+	},
+}
+
 func init() {
 	taskListCmd.Flags().StringVar(&taskListAssignee, "assignee", "", "assignee gid (use 'me' for self)")
 	taskListCmd.Flags().StringVar(&taskListProject, "project", "", "project gid")
@@ -235,5 +266,7 @@ func init() {
 
 	taskAddTagCmd.Flags().StringVar(&taskAddTagTag, "tag", "", "tag gid (required)")
 
-	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd)
+	taskRenameCmd.Flags().StringVar(&taskRenameName, "name", "", "new name (required)")
+
+	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd)
 }

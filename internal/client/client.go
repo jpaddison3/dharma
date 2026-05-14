@@ -167,3 +167,14 @@ func (c *Client) Post(ctx context.Context, path string, body, out interface{}) e
 	}
 	return json.Unmarshal(resp.Data, out)
 }
+
+func (c *Client) Put(ctx context.Context, path string, body, out interface{}) error {
+	resp, err := c.Do(ctx, "PUT", path, nil, body)
+	if err != nil {
+		return err
+	}
+	if out == nil || len(resp.Data) == 0 {
+		return nil
+	}
+	return json.Unmarshal(resp.Data, out)
+}

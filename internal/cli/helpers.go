@@ -27,6 +27,14 @@ func runPost(ctx context.Context, c *client.Client, path string, body interface{
 	return output.Print(os.Stdout, v)
 }
 
+func runPut(ctx context.Context, c *client.Client, path string, body interface{}) error {
+	var v interface{}
+	if err := c.Put(ctx, path, body, &v); err != nil {
+		return err
+	}
+	return output.Print(os.Stdout, v)
+}
+
 func runList(ctx context.Context, c *client.Client, path string, q url.Values, paginate bool) error {
 	if q == nil {
 		q = url.Values{}
