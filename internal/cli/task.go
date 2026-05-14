@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -240,6 +242,70 @@ var taskCompleteCmd = &cobra.Command{
 	},
 }
 
+var (
+	taskSetDueDate  string
+	taskSetDueClear bool
+)
+
+var taskSetDueCmd = &cobra.Command{
+	Use:   "set-due <gid>",
+	Short: "Set or clear a task's due date",
+	Long:  "Set or clear a task's due date. --due accepts YYYY-MM-DD, 'today', 'tomorrow', or an ISO 8601 datetime (containing 'T'). Use --clear to remove the due date.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if taskSetDueClear && taskSetDueDate != "" {
+			return fmt.Errorf("--clear and --due are mutually exclusive")
+		}
+		if !taskSetDueClear && taskSetDueDate == "" {
+			return fmt.Errorf("--due is required (YYYY-MM-DD, today, tomorrow, or ISO datetime), or use --clear")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		body := map[string]interface{}{}
+		if taskSetDueClear {
+			body["due_on"] = nil
+		} else {
+			value := taskSetDueDate
+			switch strings.ToLower(value) {
+			case "today":
+				value = time.Now().Format("2006-01-02")
+			case "tomorrow":
+				value = time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+			}
+			if strings.Contains(value, "T") {
+				body["due_at"] = value
+			} else {
+				body["due_on"] = value
+			}
+		}
+		return runPut(context.Background(), c, "/tasks/"+args[0], body)
+	},
+}
+
+var (
+	taskStoriesFields   string
+	taskStoriesPaginate bool
+)
+
+var taskStoriesCmd = &cobra.Command{
+	Use:   "stories <gid>",
+	Short: "List stories (comments and change log) on a task",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		q := url.Values{}
+		if taskStoriesFields != "" {
+			q.Set("opt_fields", taskStoriesFields)
+		}
+		return runList(context.Background(), c, "/tasks/"+args[0]+"/stories", q, taskStoriesPaginate)
+	},
+}
+
 func init() {
 	taskListCmd.Flags().StringVar(&taskListAssignee, "assignee", "", "assignee gid (use 'me' for self)")
 	taskListCmd.Flags().StringVar(&taskListProject, "project", "", "project gid")
@@ -268,5 +334,11 @@ func init() {
 
 	taskRenameCmd.Flags().StringVar(&taskRenameName, "name", "", "new name (required)")
 
-	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd)
+	taskSetDueCmd.Flags().StringVar(&taskSetDueDate, "due", "", "YYYY-MM-DD, today, tomorrow, or ISO 8601 datetime")
+	taskSetDueCmd.Flags().BoolVar(&taskSetDueClear, "clear", false, "clear the due date")
+
+	taskStoriesCmd.Flags().StringVar(&taskStoriesFields, "fields", "", "opt_fields, e.g. type,text,created_at,created_by.name")
+	taskStoriesCmd.Flags().BoolVar(&taskStoriesPaginate, "paginate", false, "fetch all pages")
+
+	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd, taskSetDueCmd, taskStoriesCmd)
 }
