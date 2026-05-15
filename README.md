@@ -69,3 +69,7 @@ Many endpoints need a workspace gid. Resolution order:
 1. `--workspace` flag
 2. `ASANA_WORKSPACE` env var
 3. `default_workspace` in the config file
+
+## License
+
+MIT — see [LICENSE](LICENSE).
