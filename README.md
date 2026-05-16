@@ -8,7 +8,7 @@ Early but usable. Auth, raw API passthrough, and resource commands (`user`, `wor
 
 ## Install
 
-Requires Go 1.22+.
+Requires Go 1.25+.
 
 ```sh
 go install github.com/jpaddison3/dharma/cmd/dharma@latest

@@ -10,6 +10,7 @@ import (
 	"github.com/jpaddison3/dharma/internal/client"
 	"github.com/jpaddison3/dharma/internal/config"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var authCmd = &cobra.Command{
@@ -22,12 +23,10 @@ var authLoginCmd = &cobra.Command{
 	Short: "Store a personal access token",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Fprint(os.Stderr, "Paste your Asana PAT (https://app.asana.com/0/my-apps): ")
-		reader := bufio.NewReader(os.Stdin)
-		line, err := reader.ReadString('\n')
+		token, err := readSecret(os.Stdin)
 		if err != nil {
 			return err
 		}
-		token := strings.TrimSpace(line)
 		if token == "" {
 			return fmt.Errorf("token is empty")
 		}
@@ -75,6 +74,27 @@ var authLogoutCmd = &cobra.Command{
 		cfg.Token = ""
 		return config.Save(cfg)
 	},
+}
+
+// readSecret reads a single line from f. When f is a TTY it uses term.ReadPassword
+// so the input isn't echoed; otherwise it falls back to a buffered read so piped
+// input (e.g. `echo $PAT | dharma auth login`) still works.
+func readSecret(f *os.File) (string, error) {
+	fd := int(f.Fd())
+	if term.IsTerminal(fd) {
+		b, err := term.ReadPassword(fd)
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+	line, err := bufio.NewReader(f).ReadString('\n')
+	trimmed := strings.TrimSpace(line)
+	if err != nil && trimmed == "" {
+		return "", err
+	}
+	return trimmed, nil
 }
 
 func init() {
