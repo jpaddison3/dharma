@@ -285,6 +285,56 @@ var taskSetDueCmd = &cobra.Command{
 }
 
 var (
+	taskAssignTo    string
+	taskAssignClear bool
+)
+
+var taskAssignCmd = &cobra.Command{
+	Use:   "assign <gid>",
+	Short: "Assign, reassign, or unassign a task",
+	Long:  "Set or clear a task's assignee. --to accepts a user gid or the literal 'me'. Use --clear to unassign.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if taskAssignClear && taskAssignTo != "" {
+			return fmt.Errorf("--clear and --to are mutually exclusive")
+		}
+		if !taskAssignClear && taskAssignTo == "" {
+			return fmt.Errorf("--to is required (user gid or 'me'), or use --clear")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		body := map[string]interface{}{}
+		if taskAssignClear {
+			body["assignee"] = nil
+		} else {
+			body["assignee"] = taskAssignTo
+		}
+		return runPut(context.Background(), c, "/tasks/"+args[0], body)
+	},
+}
+
+var taskSetNotesText string
+
+var taskSetNotesCmd = &cobra.Command{
+	Use:   "set-notes <gid>",
+	Short: "Set a task's description (notes)",
+	Long:  "Set a task's description. Pass --notes \"\" to clear.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !cmd.Flags().Changed("notes") {
+			return fmt.Errorf("--notes is required (pass \"\" to clear)")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		return runPut(context.Background(), c, "/tasks/"+args[0], map[string]interface{}{"notes": taskSetNotesText})
+	},
+}
+
+var (
 	taskStoriesFields   string
 	taskStoriesPaginate bool
 )
@@ -337,8 +387,13 @@ func init() {
 	taskSetDueCmd.Flags().StringVar(&taskSetDueDate, "due", "", "YYYY-MM-DD, today, tomorrow, or ISO 8601 datetime")
 	taskSetDueCmd.Flags().BoolVar(&taskSetDueClear, "clear", false, "clear the due date")
 
+	taskAssignCmd.Flags().StringVar(&taskAssignTo, "to", "", "assignee user gid, or 'me'")
+	taskAssignCmd.Flags().BoolVar(&taskAssignClear, "clear", false, "unassign the task")
+
+	taskSetNotesCmd.Flags().StringVar(&taskSetNotesText, "notes", "", "new description (pass \"\" to clear)")
+
 	taskStoriesCmd.Flags().StringVar(&taskStoriesFields, "fields", "", "opt_fields, e.g. type,text,created_at,created_by.name")
 	taskStoriesCmd.Flags().BoolVar(&taskStoriesPaginate, "paginate", false, "fetch all pages")
 
-	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd, taskSetDueCmd, taskStoriesCmd)
+	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd, taskSetDueCmd, taskAssignCmd, taskSetNotesCmd, taskStoriesCmd)
 }

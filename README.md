@@ -1,10 +1,10 @@
 # dharma
 
-Agent-friendly CLI for the Asana API. Built because the Asana MCP server keeps breaking and CLIs are easier for AI agents to call reliably.
+Agent-friendly CLI for the Asana API. The Asana MCP server is underpowered for real workflows; dharma offers native commands for the common operations (tasks, sections, tags, My Tasks) and a `gh api`-style passthrough for everything else.
 
 ## Status
 
-Early — auth, raw API passthrough, and resource commands (`user`, `workspace`, `project`, `task`, `my-tasks`) are functional.
+Early but usable. Auth, raw API passthrough, and resource commands (`user`, `workspace`, `project`, `section`, `tag`, `task`, `my-tasks`) are functional.
 
 ## Install
 
@@ -42,6 +42,8 @@ dharma task rename <gid> --name "New name"
 dharma task complete <gid>
 dharma task set-due <gid> --due 2026-06-15        # or: today, tomorrow, or ISO datetime
 dharma task set-due <gid> --clear
+dharma task assign <gid> --to me                  # or a user gid; --clear to unassign
+dharma task set-notes <gid> --notes "..."         # pass "" to clear
 dharma task stories <gid> --fields type,text,created_at,created_by.name
 
 dharma my-tasks list                                  # all tasks assigned to me
