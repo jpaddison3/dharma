@@ -44,6 +44,7 @@ dharma task set-due <gid> --due 2026-06-15        # or: today, tomorrow, or ISO 
 dharma task set-due <gid> --clear
 dharma task assign <gid> --to me                  # or a user gid; --clear to unassign
 dharma task set-notes <gid> --notes "..."         # pass "" to clear
+dharma task search --text "MINERVA" --completed=false --fields name
 dharma task stories <gid> --fields type,text,created_at,created_by.name
 
 dharma my-tasks list                                  # all tasks assigned to me

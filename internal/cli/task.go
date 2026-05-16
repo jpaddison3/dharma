@@ -2,12 +2,15 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jpaddison3/dharma/internal/output"
 	"github.com/spf13/cobra"
 )
 
@@ -335,6 +338,86 @@ var taskSetNotesCmd = &cobra.Command{
 }
 
 var (
+	taskSearchText          string
+	taskSearchAssignee      string
+	taskSearchCompleted     bool
+	taskSearchProject       string
+	taskSearchSection       string
+	taskSearchTag           string
+	taskSearchModifiedSince string
+	taskSearchFields        string
+	taskSearchLimit         int
+)
+
+var taskSearchCmd = &cobra.Command{
+	Use:   "search",
+	Short: "Search tasks across a workspace",
+	Long: `Search tasks across a workspace using Asana's /tasks/search endpoint.
+
+The endpoint returns at most 100 results in a single response and does NOT support
+offset pagination. To page through a longer result set, narrow with the provided
+filters or chunk by modification time: take the oldest result's modified_at value
+and re-run with --modified-since pointing earlier (Asana's parameter is actually
+modified_at.after, so this fetches anything newer than that timestamp — invert
+manually if you need older).
+
+A warning is printed to stderr if the result count equals --limit, since results
+may have been truncated.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ws := resolveWorkspace()
+		if ws == "" {
+			return fmt.Errorf("--workspace required (set ASANA_WORKSPACE, default_workspace, or pass --workspace)")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		limit := taskSearchLimit
+		if limit <= 0 {
+			limit = 100
+		}
+		q := url.Values{}
+		q.Set("limit", strconv.Itoa(limit))
+		if taskSearchText != "" {
+			q.Set("text", taskSearchText)
+		}
+		if taskSearchAssignee != "" {
+			q.Set("assignee.any", taskSearchAssignee)
+		}
+		if cmd.Flags().Changed("completed") {
+			q.Set("completed", strconv.FormatBool(taskSearchCompleted))
+		}
+		if taskSearchProject != "" {
+			q.Set("projects.any", taskSearchProject)
+		}
+		if taskSearchSection != "" {
+			q.Set("sections.any", taskSearchSection)
+		}
+		if taskSearchTag != "" {
+			q.Set("tags.any", taskSearchTag)
+		}
+		if taskSearchModifiedSince != "" {
+			q.Set("modified_at.after", taskSearchModifiedSince)
+		}
+		if taskSearchFields != "" {
+			q.Set("opt_fields", taskSearchFields)
+		}
+		resp, err := c.Do(context.Background(), "GET", "/workspaces/"+ws+"/tasks/search", q, nil)
+		if err != nil {
+			return err
+		}
+		var results []interface{}
+		if err := json.Unmarshal(resp.Data, &results); err != nil {
+			return fmt.Errorf("search response was not an array: %w", err)
+		}
+		if len(results) >= limit {
+			fmt.Fprintf(os.Stderr, "warning: %d results returned (== --limit); the search endpoint has no pagination — narrow filters or use --modified-since to chunk by modification time.\n", len(results))
+		}
+		return output.Print(os.Stdout, results)
+	},
+}
+
+var (
 	taskStoriesFields   string
 	taskStoriesPaginate bool
 )
@@ -392,8 +475,18 @@ func init() {
 
 	taskSetNotesCmd.Flags().StringVar(&taskSetNotesText, "notes", "", "new description (pass \"\" to clear)")
 
+	taskSearchCmd.Flags().StringVar(&taskSearchText, "text", "", "match name/description")
+	taskSearchCmd.Flags().StringVar(&taskSearchAssignee, "assignee", "", "user gid or 'me'")
+	taskSearchCmd.Flags().BoolVar(&taskSearchCompleted, "completed", false, "filter by completion (omit to return either)")
+	taskSearchCmd.Flags().StringVar(&taskSearchProject, "project", "", "project gid")
+	taskSearchCmd.Flags().StringVar(&taskSearchSection, "section", "", "section gid")
+	taskSearchCmd.Flags().StringVar(&taskSearchTag, "tag", "", "tag gid")
+	taskSearchCmd.Flags().StringVar(&taskSearchModifiedSince, "modified-since", "", "ISO 8601 datetime; maps to modified_at.after")
+	taskSearchCmd.Flags().StringVar(&taskSearchFields, "fields", "", "opt_fields, e.g. name,assignee.name,modified_at")
+	taskSearchCmd.Flags().IntVar(&taskSearchLimit, "limit", 0, "max results (1-100, default 100)")
+
 	taskStoriesCmd.Flags().StringVar(&taskStoriesFields, "fields", "", "opt_fields, e.g. type,text,created_at,created_by.name")
 	taskStoriesCmd.Flags().BoolVar(&taskStoriesPaginate, "paginate", false, "fetch all pages")
 
-	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd, taskSetDueCmd, taskAssignCmd, taskSetNotesCmd, taskStoriesCmd)
+	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd, taskSetDueCmd, taskAssignCmd, taskSetNotesCmd, taskSearchCmd, taskStoriesCmd)
 }
