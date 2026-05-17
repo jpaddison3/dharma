@@ -4,7 +4,7 @@ Agent-friendly CLI for the Asana API. The Asana MCP server is underpowered for r
 
 ## Status
 
-Early but usable. Auth, raw API passthrough, and resource commands (`user`, `workspace`, `project`, `section`, `tag`, `task`, `my-tasks`) are functional.
+Early but usable. Auth, raw API passthrough, and resource commands (`user`, `workspace`, `project`, `section`, `tag`, `task`, `my-tasks`, `attachment`) are functional.
 
 ## Install
 
@@ -46,6 +46,11 @@ dharma task assign <gid> --to me                  # or a user gid; --clear to un
 dharma task set-notes <gid> --notes "..."         # pass "" to clear
 dharma task search --text "MINERVA" --completed=false --fields name
 dharma task stories <gid> --fields type,text,created_at,created_by.name
+
+# attachments
+dharma attachment download <gid> --output ./screenshot.png
+dharma attachment download <gid> --output-dir ./downloads        # uses attachment name
+dharma task download-attachments <task-gid> --output-dir ./out   # all attachments on a task
 
 dharma my-tasks list                                  # all tasks assigned to me
 dharma my-tasks list --section "Main Work"            # filtered to a named section
