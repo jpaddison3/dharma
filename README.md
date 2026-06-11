@@ -81,6 +81,8 @@ Many endpoints need a workspace gid. Resolution order:
 
 ## Cowork plugin
 
+> **Status: experimental — never tested against a live Cowork session.** The `.mcpb` desktop extension below is the verified route; prefer it. A further difference: this route places the raw PAT inside the VM-readable filesystem (and SKILL.md tells the agent where the config lives), so a prompt-injected session could read the token itself — the `.mcpb` keeps the token host-side where the model only ever sees tool results.
+
 To use dharma from inside [Claude Cowork](https://claude.com/docs/cowork)'s VM, install it as a plugin:
 
 ```sh
@@ -96,7 +98,7 @@ Notes:
 
 ## Desktop extension (.mcpb)
 
-For sharing with colleagues who don't use a terminal: a Claude Desktop extension that wraps dharma in an MCP shim. Recipients double-click the file, paste an Asana PAT into the settings form (stored in macOS Keychain), and get Asana tools in chat and Cowork — no Node, npm, or terminal needed.
+For sharing with colleagues who don't use a terminal: a Claude Desktop extension that wraps dharma in an MCP shim. Recipients double-click the file, paste an Asana PAT into the settings form (stored in macOS Keychain), and get Asana tools in chat and Cowork — no Node, npm, or terminal needed. Recipients in more than one Asana workspace get an instructive error pointing at the optional "Workspace GID" setting (no silent guessing).
 
 ```sh
 ./scripts/build-mcpb.sh      # → dist/dharma.mcpb

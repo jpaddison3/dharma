@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 
 	"github.com/spf13/cobra"
@@ -22,11 +21,11 @@ var tagListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List tags in a workspace; --name uses Asana's typeahead for fuzzy matching",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ws := resolveWorkspace()
-		if ws == "" {
-			return fmt.Errorf("workspace required (--workspace, ASANA_WORKSPACE, or config default)")
-		}
 		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		ws, err := requireWorkspace(context.Background(), c)
 		if err != nil {
 			return err
 		}

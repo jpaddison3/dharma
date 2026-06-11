@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 
 	"github.com/spf13/cobra"
@@ -23,9 +22,9 @@ var projectListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		ws := resolveWorkspace()
-		if ws == "" {
-			return fmt.Errorf("workspace required (--workspace, ASANA_WORKSPACE, or config default)")
+		ws, err := requireWorkspace(context.Background(), c)
+		if err != nil {
+			return err
 		}
 		q := url.Values{"workspace": []string{ws}}
 		return runList(context.Background(), c, "/projects", q, projectListPaginate)

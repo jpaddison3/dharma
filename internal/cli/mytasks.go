@@ -33,11 +33,11 @@ var myTasksListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		ws := resolveWorkspace()
-		if ws == "" {
-			return fmt.Errorf("workspace required (--workspace, ASANA_WORKSPACE, or config default)")
-		}
 		ctx := context.Background()
+		ws, err := requireWorkspace(ctx, c)
+		if err != nil {
+			return err
+		}
 
 		q := url.Values{}
 		if myTasksListFields != "" {

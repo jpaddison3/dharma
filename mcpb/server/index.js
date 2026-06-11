@@ -11,58 +11,106 @@ import os from "node:os";
 import fs from "node:fs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-let dharmaBin = path.join(here, "..", "bin", "dharma");
+const pkg = JSON.parse(fs.readFileSync(path.join(here, "..", "package.json"), "utf8"));
 
-// Self-heal a lost exec bit (zip extraction doesn't always preserve it).
+// Claude Desktop substitutes ${user_config.*} into env; depending on the host
+// version an unset optional field can arrive as an empty string or as the
+// literal placeholder. Treat both as absent rather than letting them reach
+// the CLI as real values.
+for (const key of ["ASANA_TOKEN", "ASANA_WORKSPACE"]) {
+  if (!process.env[key] || process.env[key].startsWith("${")) delete process.env[key];
+}
+
+let dharmaBin = path.join(here, "..", "bin", "dharma");
+if (!fs.existsSync(dharmaBin)) {
+  throw new Error(`bundled dharma binary missing at ${dharmaBin} — run scripts/build-mcpb.sh`);
+}
+
+// Self-heal a lost exec bit (zip extraction doesn't always preserve it). The
+// healed copy is per-process so a restarting server never rewrites a binary
+// an older process is still executing.
 try {
   fs.accessSync(dharmaBin, fs.constants.X_OK);
 } catch {
-  const healed = path.join(os.tmpdir(), "dharma-mcpb-bin");
+  const healed = path.join(os.tmpdir(), `dharma-mcpb-bin-${process.pid}`);
   fs.copyFileSync(dharmaBin, healed);
   fs.chmodSync(healed, 0o755);
   dharmaBin = healed;
 }
 
-// Point dharma at an empty config dir so a ~/.config/dharma/config.json on
-// the host can never mask broken token plumbing — the extension must work
-// from ASANA_TOKEN alone, exactly as it would on a colleague's machine.
-const isolatedConfig = fs.mkdtempSync(path.join(os.tmpdir(), "dharma-mcpb-cfg-"));
+// A path that never exists: dharma treats a missing config file as empty, so
+// a ~/.config/dharma/config.json on the host can never mask broken token
+// plumbing — the extension must work from its own settings alone, exactly as
+// it would on a colleague's machine.
+const isolatedConfig = path.join(here, "..", "no-user-config");
 
-let workspaceGid = null;
+let workspaceGid = process.env.ASANA_WORKSPACE ?? null;
+let workspacePromise = null;
 
 function runDharma(args) {
   return new Promise((resolve) => {
     const env = { ...process.env, XDG_CONFIG_HOME: isolatedConfig };
+    // Once resolved, the workspace gid is offered to every call; commands
+    // that don't take a workspace ignore the env var.
     if (workspaceGid) env.ASANA_WORKSPACE = workspaceGid;
     execFile(dharmaBin, args, { env, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
-      resolve({ ok: !err, stdout: stdout ?? "", stderr: stderr ?? "" });
+      resolve({ ok: !err, stdout: stdout ?? "", stderr: stderr ?? "", error: err?.message ?? "" });
     });
   });
 }
 
-// Most endpoints need a workspace gid; colleagues won't know theirs, so
-// resolve it once from the API (nearly everyone at 80k is in one workspace).
-async function ensureWorkspace() {
-  if (workspaceGid) return;
+async function fetchSingleWorkspace() {
   const res = await runDharma(["workspace", "list"]);
-  if (!res.ok) throw new Error(`could not list workspaces: ${res.stderr.trim()}`);
+  if (!res.ok) {
+    throw new Error(`could not list workspaces: ${(res.stderr.trim() || res.error)}`);
+  }
   const workspaces = JSON.parse(res.stdout);
   if (!Array.isArray(workspaces) || workspaces.length === 0) {
     throw new Error("no Asana workspaces visible to this token");
   }
-  workspaceGid = workspaces[0].gid;
+  if (workspaces.length > 1) {
+    const names = workspaces.map((w) => `${w.name} (${w.gid})`).join(", ");
+    throw new Error(
+      `your Asana token can see multiple workspaces: ${names}. ` +
+        `Ask the user to set "Workspace GID" in this extension's settings ` +
+        `(Claude Desktop → Settings → Extensions → Asana (dharma)) to the gid of the one to use.`
+    );
+  }
+  return workspaces[0].gid;
+}
+
+// Share one in-flight lookup across concurrent first calls, but clear it on
+// failure so a transient error isn't sticky for the life of the process.
+async function ensureWorkspace() {
+  if (workspaceGid) return;
+  workspacePromise ??= fetchSingleWorkspace();
+  try {
+    workspaceGid = await workspacePromise;
+  } catch (e) {
+    workspacePromise = null;
+    throw e;
+  }
 }
 
 function asResult(res) {
   if (!res.ok) {
-    return { content: [{ type: "text", text: res.stderr.trim() || "dharma exited non-zero" }], isError: true };
+    return {
+      content: [{ type: "text", text: res.stderr.trim() || res.error || "dharma failed with no output" }],
+      isError: true,
+    };
   }
-  const text = res.stdout.trim() || res.stderr.trim() || "(empty response)";
+  let text = res.stdout.trim() || "(empty response)";
+  // dharma signals caveats — notably "results truncated, more pages exist" —
+  // on stderr even when the call succeeds; the model needs to see them.
+  const warning = res.stderr.trim();
+  if (warning) text += `\n\n[dharma warning] ${warning}`;
   return { content: [{ type: "text", text }] };
 }
 
+const server = new McpServer({ name: "dharma-asana", version: pkg.version });
+
 // Registers a tool whose handler returns a dharma argv (or throws).
-function cliTool(name, description, shape, needsWorkspace, buildArgs) {
+function cliTool(name, description, shape, { needsWorkspace }, buildArgs) {
   server.registerTool(name, { description, inputSchema: shape }, async (args) => {
     try {
       if (needsWorkspace) await ensureWorkspace();
@@ -73,32 +121,31 @@ function cliTool(name, description, shape, needsWorkspace, buildArgs) {
   });
 }
 
-const server = new McpServer({ name: "dharma-asana", version: "0.1.0" });
-
-const fields = z.string().optional().describe("Comma-separated opt_fields, e.g. name,assignee.name,due_on");
+const fieldsSchema = z.string().optional().describe("Comma-separated opt_fields, e.g. name,assignee.name,due_on");
 
 cliTool(
   "whoami",
   "Get the authenticated Asana user (gid, name, email). Useful as a connectivity check.",
   {},
-  false,
+  { needsWorkspace: false },
   () => ["user", "me"]
 );
 
 cliTool(
   "my_tasks",
-  "List open tasks in the user's My Tasks. Optionally filter to a named section (e.g. \"Main Work\").",
+  "List open tasks in the user's My Tasks (first 100 by default; the result notes truncation). Optionally filter to a named section (e.g. \"Main Work\").",
   {
     section: z.string().optional().describe("My Tasks section name to filter to"),
-    include_completed: z.boolean().optional().describe("Include completed tasks (capped at 100 most recent; default false)"),
-    fields,
+    paginate: z.boolean().optional().describe("Fetch all pages instead of the first 100 (can be large)"),
+    include_completed: z.boolean().optional().describe("Include completed tasks (first 100 in My Tasks order; default false)"),
+    fields: fieldsSchema,
   },
-  true,
-  ({ section, include_completed, fields }) => {
+  { needsWorkspace: true },
+  ({ section, paginate, include_completed, fields }) => {
     const argv = ["my-tasks", "list"];
-    // Incomplete-only paginates safely; the full history is thousands of tasks.
-    if (include_completed) argv.push("--limit", "100");
-    else argv.push("--incomplete", "--paginate");
+    if (!include_completed) argv.push("--incomplete");
+    if (paginate) argv.push("--paginate");
+    else argv.push("--limit", "100");
     if (section) argv.push("--section", section);
     if (fields) argv.push("--fields", fields);
     return argv;
@@ -113,9 +160,9 @@ cliTool(
     assignee: z.string().optional().describe("Assignee user gid, or 'me'"),
     project: z.string().optional().describe("Project gid"),
     completed: z.boolean().optional().describe("Filter by completion; omit for both"),
-    fields,
+    fields: fieldsSchema,
   },
-  true,
+  { needsWorkspace: true },
   ({ text, assignee, project, completed, fields }) => {
     const argv = ["task", "search"];
     if (text) argv.push("--text", text);
@@ -132,49 +179,53 @@ cliTool(
   "Get a single task by gid.",
   {
     task_gid: z.string().describe("Task gid"),
-    fields,
+    fields: fieldsSchema,
   },
-  false,
+  { needsWorkspace: false },
   ({ task_gid, fields }) => {
-    const argv = ["task", "get", task_gid];
+    const argv = ["task", "get"];
     if (fields) argv.push("--fields", fields);
+    argv.push("--", task_gid);
     return argv;
   }
 );
 
 cliTool(
   "task_stories",
-  "Get a task's stories (comments and activity history).",
+  "Get a task's stories (comments and activity history). Fields default to type,text,created_at,created_by.name.",
   {
     task_gid: z.string().describe("Task gid"),
-    fields,
+    fields: fieldsSchema,
   },
-  false,
+  { needsWorkspace: false },
   ({ task_gid, fields }) => {
-    const argv = ["task", "stories", task_gid];
-    argv.push("--fields", fields || "type,text,created_at,created_by.name");
+    const argv = ["task", "stories"];
+    if (fields) argv.push("--fields", fields);
+    argv.push("--", task_gid);
     return argv;
   }
 );
 
 cliTool(
   "list_projects",
-  "List projects in the workspace.",
+  "List projects in the workspace (first 100; the result notes truncation).",
   {},
-  true,
+  { needsWorkspace: true },
   () => ["project", "list"]
 );
 
 cliTool(
   "list_project_tasks",
-  "List tasks in a project.",
+  "List open tasks in a project (first 100; the result notes truncation).",
   {
     project_gid: z.string().describe("Project gid"),
-    fields,
+    include_completed: z.boolean().optional().describe("Include completed tasks (default false)"),
+    fields: fieldsSchema,
   },
-  false,
-  ({ project_gid, fields }) => {
+  { needsWorkspace: false },
+  ({ project_gid, include_completed, fields }) => {
     const argv = ["task", "list", "--project", project_gid];
+    if (!include_completed) argv.push("--incomplete");
     if (fields) argv.push("--fields", fields);
     return argv;
   }
@@ -182,19 +233,22 @@ cliTool(
 
 cliTool(
   "create_task",
-  "Create a task.",
+  "Create a task. With no project it goes to the user's My Tasks.",
   {
     name: z.string().describe("Task name"),
     notes: z.string().optional().describe("Task description"),
     project_gid: z.string().optional().describe("Project to add the task to; omit to create in My Tasks"),
     assignee: z.string().optional().describe("Assignee user gid, or 'me'"),
   },
-  true,
+  { needsWorkspace: true },
   ({ name, notes, project_gid, assignee }) => {
     const argv = ["task", "create", "--name", name];
     if (notes) argv.push("--notes", notes);
     if (project_gid) argv.push("--project", project_gid);
     if (assignee) argv.push("--assignee", assignee);
+    // A task with neither project nor assignee would land in nobody's My
+    // Tasks (and be findable only via search); default to the user.
+    else if (!project_gid) argv.push("--assignee", "me");
     return argv;
   }
 );
@@ -206,8 +260,8 @@ cliTool(
     task_gid: z.string().describe("Task gid"),
     text: z.string().describe("Comment text"),
   },
-  false,
-  ({ task_gid, text }) => ["task", "comment", task_gid, "--text", text]
+  { needsWorkspace: false },
+  ({ task_gid, text }) => ["task", "comment", "--text", text, "--", task_gid]
 );
 
 cliTool(
@@ -216,8 +270,8 @@ cliTool(
   {
     task_gid: z.string().describe("Task gid"),
   },
-  false,
-  ({ task_gid }) => ["task", "complete", task_gid]
+  { needsWorkspace: false },
+  ({ task_gid }) => ["task", "complete", "--", task_gid]
 );
 
 cliTool(
@@ -228,12 +282,14 @@ cliTool(
     due: z.string().optional().describe("Due date: YYYY-MM-DD, 'today', 'tomorrow', or ISO datetime"),
     clear: z.boolean().optional().describe("Clear the due date instead of setting one"),
   },
-  false,
+  { needsWorkspace: false },
   ({ task_gid, due, clear }) => {
-    const argv = ["task", "set-due", task_gid];
+    if (due && clear) throw new Error("provide either due or clear, not both");
+    const argv = ["task", "set-due"];
     if (clear) argv.push("--clear");
     else if (due) argv.push("--due", due);
     else throw new Error("provide either due or clear");
+    argv.push("--", task_gid);
     return argv;
   }
 );
@@ -250,12 +306,13 @@ cliTool(
     body: z.string().optional().describe("Raw JSON body, passed through unchanged"),
     paginate: z.boolean().optional().describe("Follow all pages (GET only)"),
   },
-  true,
+  { needsWorkspace: false },
   ({ method, path: apiPath, field, body, paginate }) => {
-    const argv = ["api", "-X", method, apiPath];
+    const argv = ["api", "-X", method];
     for (const f of field ?? []) argv.push("-f", f);
     if (body) argv.push("--body", body);
     if (paginate) argv.push("--paginate");
+    argv.push("--", apiPath);
     return argv;
   }
 );

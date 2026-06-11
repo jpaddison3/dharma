@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "dharma-asana",
   "display_name": "Asana (dharma)",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Asana tools — My Tasks, task search, comments, projects — backed by the dharma CLI.",
   "author": {
     "name": "JP Addison"
@@ -14,7 +14,8 @@
       "command": "node",
       "args": ["${__dirname}/server/index.js"],
       "env": {
-        "ASANA_TOKEN": "${user_config.asana_token}"
+        "ASANA_TOKEN": "${user_config.asana_token}",
+        "ASANA_WORKSPACE": "${user_config.workspace_gid}"
       }
     }
   },
@@ -22,9 +23,16 @@
     "asana_token": {
       "type": "string",
       "title": "Asana Personal Access Token",
-      "description": "In Asana, visit https://app.asana.com/0/my-apps → Create new token → copy it and paste it here.",
+      "description": "In Asana, visit https://app.asana.com/0/my-apps → Create new token → copy it and paste it here. Note: the token gives Claude the same Asana access you have; you can revoke it anytime from that same page (uninstalling this extension does not revoke it).",
       "sensitive": true,
       "required": true
+    },
+    "workspace_gid": {
+      "type": "string",
+      "title": "Workspace GID (optional)",
+      "description": "Leave blank if you only belong to one Asana workspace. If you belong to several, the tools will ask you to set this — paste the gid of the workspace to use (the error message lists your workspaces with their gids).",
+      "sensitive": false,
+      "required": false
     }
   },
   "compatibility": {

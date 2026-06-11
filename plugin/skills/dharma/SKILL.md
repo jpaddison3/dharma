@@ -11,12 +11,12 @@ This plugin bundles `dharma`, an agent-friendly CLI for the Asana API, with preb
 
 ```sh
 DHARMA="${CLAUDE_PLUGIN_ROOT}/bin/dharma"
-"$DHARMA" auth status
+"$DHARMA" user me
 ```
 
 If `CLAUDE_PLUGIN_ROOT` is unset, the plugin root is two directories above this SKILL.md file. The `bin/dharma` wrapper picks the right binary for the current OS/architecture and points it at the bundled config — invoke the wrapper, not the `dharma-linux-*` binaries directly.
 
-`auth status` prints the authenticated user as JSON. If it works, you're set.
+`user me` prints the authenticated user as JSON. If it works, you're set.
 
 ## Troubleshooting
 
@@ -26,43 +26,22 @@ If `CLAUDE_PLUGIN_ROOT` is unset, the plugin root is two directories above this 
 
 ## Usage
 
-`--help` on any command is authoritative; the CLI is self-documenting. Common operations:
+`--help` on any command (and `"$DHARMA" --help` for the command list) is authoritative — the CLI is self-documenting, so check it rather than guessing flags. A few motivating examples:
 
 ```sh
-"$DHARMA" user me
-"$DHARMA" workspace list
-"$DHARMA" project list
-
-"$DHARMA" task list --project <gid> --fields name,assignee.name,due_on
+"$DHARMA" my-tasks list --incomplete --fields name,due_on   # open tasks assigned to me
+"$DHARMA" task search --text "keyword" --completed=false --fields name
 "$DHARMA" task get <gid> --fields name,notes,assignee.name
 "$DHARMA" task create --name "Do the thing" --project <gid> --assignee me
 "$DHARMA" task comment <gid> --text "..."
-"$DHARMA" task move <gid> --section <section-gid>
-"$DHARMA" task complete <gid>
-"$DHARMA" task set-due <gid> --due 2026-06-15        # or: today, tomorrow, ISO datetime; --clear
-"$DHARMA" task assign <gid> --to me                  # or a user gid; --clear to unassign
-"$DHARMA" task set-notes <gid> --notes "..."
-"$DHARMA" task search --text "keyword" --completed=false --fields name
-"$DHARMA" task stories <gid> --fields type,text,created_at,created_by.name
-"$DHARMA" task download-attachments <task-gid> --output-dir ./out
-
-"$DHARMA" my-tasks list --incomplete                 # open tasks assigned to me
-"$DHARMA" my-tasks list --section "Main Work"
-"$DHARMA" my-tasks list --paginate --limit 100
 ```
 
-### Raw API passthrough
-
-For endpoints without a typed command, `dharma api` works like `gh api`:
+For endpoints without a typed command, `dharma api` works like `gh api` (`"$DHARMA" api --help` documents the `-f`/`--body` semantics):
 
 ```sh
 "$DHARMA" api /users/me
 "$DHARMA" api -X POST /tasks -f name=Foo -f projects=<gid>
-"$DHARMA" api /workspaces/<gid>/tasks --paginate
-"$DHARMA" api -X PUT /tasks/<gid> --body '{"data": {"completed": true}}'
 ```
-
-`-f key=value` becomes a query parameter on GET/DELETE/HEAD and a JSON body field (wrapped in Asana's `{"data": ...}` envelope) on POST/PUT/PATCH.
 
 ## Conventions
 

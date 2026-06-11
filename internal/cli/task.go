@@ -20,12 +20,13 @@ var taskCmd = &cobra.Command{
 }
 
 var (
-	taskListAssignee string
-	taskListProject  string
-	taskListSection  string
-	taskListLimit    int
-	taskListFields   string
-	taskListPaginate bool
+	taskListAssignee   string
+	taskListProject    string
+	taskListSection    string
+	taskListLimit      int
+	taskListFields     string
+	taskListPaginate   bool
+	taskListIncomplete bool
 )
 
 var taskListCmd = &cobra.Command{
@@ -43,9 +44,9 @@ var taskListCmd = &cobra.Command{
 		case taskListProject != "":
 			q.Set("project", taskListProject)
 		case taskListAssignee != "":
-			ws := resolveWorkspace()
-			if ws == "" {
-				return fmt.Errorf("--workspace required with --assignee")
+			ws, err := requireWorkspace(context.Background(), c)
+			if err != nil {
+				return err
 			}
 			q.Set("workspace", ws)
 			q.Set("assignee", taskListAssignee)
@@ -57,6 +58,9 @@ var taskListCmd = &cobra.Command{
 		}
 		if taskListFields != "" {
 			q.Set("opt_fields", taskListFields)
+		}
+		if taskListIncomplete {
+			q.Set("completed_since", "now")
 		}
 		return runList(context.Background(), c, "/tasks", q, taskListPaginate)
 	},
@@ -102,10 +106,12 @@ var taskCreateCmd = &cobra.Command{
 		body := map[string]interface{}{"name": taskCreateName}
 		if len(taskCreateProjects) > 0 {
 			body["projects"] = taskCreateProjects
-		} else if ws := resolveWorkspace(); ws != "" {
-			body["workspace"] = ws
 		} else {
-			return fmt.Errorf("provide --project or set a default workspace")
+			ws, err := requireWorkspace(context.Background(), c)
+			if err != nil {
+				return err
+			}
+			body["workspace"] = ws
 		}
 		if taskCreateNotes != "" {
 			body["notes"] = taskCreateNotes
@@ -364,11 +370,11 @@ manually if you need older).
 A warning is printed to stderr if the result count equals --limit, since results
 may have been truncated.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ws := resolveWorkspace()
-		if ws == "" {
-			return fmt.Errorf("--workspace required (set ASANA_WORKSPACE, default_workspace, or pass --workspace)")
-		}
 		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		ws, err := requireWorkspace(context.Background(), c)
 		if err != nil {
 			return err
 		}
@@ -446,6 +452,7 @@ func init() {
 	taskListCmd.Flags().IntVar(&taskListLimit, "limit", 0, "max items per page (server default if 0)")
 	taskListCmd.Flags().StringVar(&taskListFields, "fields", "", "opt_fields, e.g. name,assignee.name")
 	taskListCmd.Flags().BoolVar(&taskListPaginate, "paginate", false, "fetch all pages")
+	taskListCmd.Flags().BoolVar(&taskListIncomplete, "incomplete", false, "only tasks not yet completed (completed_since=now)")
 
 	taskGetCmd.Flags().StringVar(&taskGetFields, "fields", "", "opt_fields, e.g. name,assignee.name")
 
@@ -485,7 +492,7 @@ func init() {
 	taskSearchCmd.Flags().StringVar(&taskSearchFields, "fields", "", "opt_fields, e.g. name,assignee.name,modified_at")
 	taskSearchCmd.Flags().IntVar(&taskSearchLimit, "limit", 0, "max results (1-100, default 100)")
 
-	taskStoriesCmd.Flags().StringVar(&taskStoriesFields, "fields", "", "opt_fields, e.g. type,text,created_at,created_by.name")
+	taskStoriesCmd.Flags().StringVar(&taskStoriesFields, "fields", "type,text,created_at,created_by.name", "opt_fields")
 	taskStoriesCmd.Flags().BoolVar(&taskStoriesPaginate, "paginate", false, "fetch all pages")
 
 	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd, taskSetDueCmd, taskAssignCmd, taskSetNotesCmd, taskSearchCmd, taskStoriesCmd)

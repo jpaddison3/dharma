@@ -7,28 +7,23 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/lib.sh"
 MCPB_DIR="$REPO_ROOT/mcpb"
 mkdir -p "$MCPB_DIR/bin" "$REPO_ROOT/dist"
 
 # Universal (arm64 + x86_64) binary — the shim runs host-side on macOS.
-for arch in arm64 amd64; do
-  echo "building darwin/$arch..."
-  CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
-    go -C "$REPO_ROOT" build -trimpath -ldflags="-s -w" \
-    -o "$MCPB_DIR/bin/dharma-$arch" ./cmd/dharma
-done
+build_dharma darwin arm64 "$MCPB_DIR/bin/dharma-arm64"
+build_dharma darwin amd64 "$MCPB_DIR/bin/dharma-amd64"
 lipo -create -output "$MCPB_DIR/bin/dharma" \
   "$MCPB_DIR/bin/dharma-arm64" "$MCPB_DIR/bin/dharma-amd64"
 rm "$MCPB_DIR/bin/dharma-arm64" "$MCPB_DIR/bin/dharma-amd64"
 
 echo "installing shim dependencies..."
-if [ -f "$MCPB_DIR/package-lock.json" ]; then
-  (cd "$MCPB_DIR" && npm ci --omit=dev --silent)
-else
-  (cd "$MCPB_DIR" && npm install --omit=dev --silent)
-fi
+(cd "$MCPB_DIR" && npm ci --omit=dev --silent)
 
 echo "packing..."
-npx --yes @anthropic-ai/mcpb pack "$MCPB_DIR" "$REPO_ROOT/dist/dharma.mcpb"
+# Packer pinned: this is a distribution pipeline, not a dev convenience —
+# bump deliberately.
+npx --yes @anthropic-ai/mcpb@2.1.2 pack "$MCPB_DIR" "$REPO_ROOT/dist/dharma.mcpb"
 
 echo "done: dist/dharma.mcpb"

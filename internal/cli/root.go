@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/jpaddison3/dharma/internal/client"
 	"github.com/jpaddison3/dharma/internal/config"
@@ -60,6 +62,33 @@ func resolveWorkspace() string {
 		return cfg.DefaultWorkspace
 	}
 	return ""
+}
+
+// requireWorkspace resolves the workspace gid, falling back to the API when
+// nothing is configured: a token that sees exactly one workspace uses it; a
+// token that sees several gets an error naming them rather than a silent pick.
+func requireWorkspace(ctx context.Context, c *client.Client) (string, error) {
+	if ws := resolveWorkspace(); ws != "" {
+		return ws, nil
+	}
+	var workspaces []struct {
+		GID  string `json:"gid"`
+		Name string `json:"name"`
+	}
+	if err := c.Get(ctx, "/workspaces", nil, &workspaces); err != nil {
+		return "", fmt.Errorf("resolving workspace: %w", err)
+	}
+	switch len(workspaces) {
+	case 0:
+		return "", fmt.Errorf("no workspaces visible to this token")
+	case 1:
+		return workspaces[0].GID, nil
+	}
+	names := make([]string, len(workspaces))
+	for i, w := range workspaces {
+		names[i] = fmt.Sprintf("%s (%s)", w.Name, w.GID)
+	}
+	return "", fmt.Errorf("multiple workspaces visible: %s — pass --workspace or set ASANA_WORKSPACE / default_workspace", strings.Join(names, ", "))
 }
 
 func newClient() (*client.Client, error) {

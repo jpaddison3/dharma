@@ -15,6 +15,13 @@ const transport = new StdioClientTransport({
 const client = new Client({ name: "smoke", version: "0.0.1" });
 await client.connect(transport);
 
+// Successful results may carry a "[dharma warning] ..." suffix (e.g. result
+// truncation); split it off before parsing the JSON payload.
+function parsePayload(result) {
+  const [json, warning] = result.content[0].text.split("\n\n[dharma warning] ");
+  return { data: JSON.parse(json), warning };
+}
+
 const tools = await client.listTools();
 console.log("tools:", tools.tools.map((t) => t.name).join(", "));
 
@@ -22,10 +29,28 @@ const who = await client.callTool({ name: "whoami", arguments: {} });
 console.log("whoami:", who.content[0].text.slice(0, 200), who.isError ? "(ERROR)" : "");
 
 const mine = await client.callTool({ name: "my_tasks", arguments: { fields: "name,due_on" } });
-const text = mine.content[0].text;
-console.log("my_tasks:", mine.isError ? `ERROR: ${text}` : `${JSON.parse(text).length} tasks`);
+if (mine.isError) {
+  console.log("my_tasks: ERROR:", mine.content[0].text);
+} else {
+  const { data, warning } = parsePayload(mine);
+  console.log(`my_tasks: ${data.length} tasks${warning ? " (truncation warning surfaced)" : ""}`);
+}
+
+const projects = await client.callTool({ name: "list_projects", arguments: {} });
+if (projects.isError) {
+  console.log("list_projects: ERROR:", projects.content[0].text);
+} else {
+  const { data, warning } = parsePayload(projects);
+  console.log(`list_projects: ${data.length} projects${warning ? " (truncation warning surfaced)" : ""}`);
+}
 
 const bad = await client.callTool({ name: "get_task", arguments: { task_gid: "1" } });
 console.log("bad gid -> isError:", bad.isError === true, "|", bad.content[0].text.slice(0, 80));
+
+const both = await client.callTool({
+  name: "set_due_date",
+  arguments: { task_gid: "1", due: "today", clear: true },
+});
+console.log("due+clear -> isError:", both.isError === true, "|", both.content[0].text.slice(0, 60));
 
 await client.close();

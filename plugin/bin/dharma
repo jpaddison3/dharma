@@ -16,14 +16,21 @@ esac
 
 bin="$root/bin/dharma-$os-$arch"
 if [ ! -f "$bin" ]; then
-  echo "dharma wrapper: no binary for $os/$arch at $bin (re-run scripts/install-cowork-plugin.sh)" >&2
+  echo "dharma wrapper: no binary for $os/$arch (bundled: $(ls "$root/bin" | grep '^dharma-' | tr '\n' ' '))" >&2
   exit 1
 fi
 
 # Exec bits can get lost when plugin files are synced into the Cowork VM.
+# Heal to a per-user path; reuse it across invocations when it already matches
+# (the copy is ~10MB), and build via mktemp + atomic rename so concurrent
+# invocations never exec a partial copy.
 if [ ! -x "$bin" ]; then
-  cp "$bin" /tmp/dharma-real && chmod +x /tmp/dharma-real
-  bin=/tmp/dharma-real
+  healed="${TMPDIR:-/tmp}/dharma-healed-$(id -u)"
+  if ! { [ -x "$healed" ] && [ -O "$healed" ] && cmp -s "$bin" "$healed"; }; then
+    tmp="$(mktemp "${TMPDIR:-/tmp}/dharma-heal.XXXXXX")"
+    cp "$bin" "$tmp" && chmod 755 "$tmp" && mv -f "$tmp" "$healed"
+  fi
+  bin="$healed"
 fi
 
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$root/config}"

@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Build the dharma Cowork plugin and install it into Claude Desktop's
-# org-plugins directory (macOS). Bundles linux binaries for the Cowork VM
+# org-plugins directory (macOS). Bundles a linux binary for the Cowork VM
 # plus your local dharma config (token + default workspace).
+#
+# Single-user by design: the bundle embeds the *runner's* personal PAT, so
+# never reuse this for actual org-wide distribution.
 #
 # Re-run after changing dharma or rotating your Asana PAT. Needs sudo to
 # write under /Library/Application Support.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$REPO_ROOT/scripts/lib.sh"
 DEST="/Library/Application Support/Claude/org-plugins/dharma"
 CONFIG_SRC="${XDG_CONFIG_HOME:-$HOME/.config}/dharma/config.json"
 
@@ -22,15 +26,8 @@ trap 'rm -rf "$STAGE"' EXIT
 # Plugin skeleton (manifest, skill, wrapper).
 cp -R "$REPO_ROOT/plugin/." "$STAGE/"
 
-# Cross-compile for the Cowork VM (Ubuntu arm64 on Apple Silicon; amd64 as
-# cheap insurance for other hosts).
-for arch in arm64 amd64; do
-  echo "building linux/$arch..."
-  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
-    go -C "$REPO_ROOT" build -trimpath -ldflags="-s -w" \
-    -o "$STAGE/bin/dharma-linux-$arch" ./cmd/dharma
-done
-chmod 755 "$STAGE/bin/dharma"
+# Cross-compile for the Cowork VM (Ubuntu arm64 under Apple Virtualization).
+build_dharma linux arm64 "$STAGE/bin/dharma-linux-arm64"
 
 # Bundle auth config. The wrapper sets XDG_CONFIG_HOME to <plugin>/config, so
 # dharma's normal config loading finds it.
