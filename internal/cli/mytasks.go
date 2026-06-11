@@ -18,10 +18,11 @@ var myTasksCmd = &cobra.Command{
 }
 
 var (
-	myTasksListSection  string
-	myTasksListFields   string
-	myTasksListLimit    int
-	myTasksListPaginate bool
+	myTasksListSection    string
+	myTasksListFields     string
+	myTasksListLimit      int
+	myTasksListPaginate   bool
+	myTasksListIncomplete bool
 )
 
 var myTasksListCmd = &cobra.Command{
@@ -44,6 +45,9 @@ var myTasksListCmd = &cobra.Command{
 		}
 		if myTasksListLimit > 0 {
 			q.Set("limit", strconv.Itoa(myTasksListLimit))
+		}
+		if myTasksListIncomplete {
+			q.Set("completed_since", "now")
 		}
 
 		if myTasksListSection != "" {
@@ -112,5 +116,6 @@ func init() {
 	myTasksListCmd.Flags().StringVar(&myTasksListFields, "fields", "", "opt_fields, e.g. name,assignee.name,due_on")
 	myTasksListCmd.Flags().IntVar(&myTasksListLimit, "limit", 0, "max items per page (server default if 0)")
 	myTasksListCmd.Flags().BoolVar(&myTasksListPaginate, "paginate", false, "fetch all pages")
+	myTasksListCmd.Flags().BoolVar(&myTasksListIncomplete, "incomplete", false, "only tasks not yet completed (completed_since=now)")
 	myTasksCmd.AddCommand(myTasksListCmd)
 }
