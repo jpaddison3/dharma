@@ -1,0 +1,9 @@
+{
+  "name": "dharma",
+  "version": "0.1.0",
+  "description": "Asana CLI for agents — tasks, projects, sections, tags, My Tasks, search, attachments, and a raw API passthrough.",
+  "author": {
+    "name": "JP Addison"
+  },
+  "installationPreference": "auto_install"
+}

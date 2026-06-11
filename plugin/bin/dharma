@@ -1,0 +1,31 @@
+#!/bin/sh
+# Arch-dispatching wrapper for the bundled dharma binaries. Points the CLI at
+# the plugin's bundled config (PAT + default workspace, baked in at install
+# time) unless the caller already set XDG_CONFIG_HOME.
+set -eu
+
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+arch="$(uname -m)"
+case "$arch" in
+  aarch64|arm64) arch=arm64 ;;
+  x86_64|amd64) arch=amd64 ;;
+  *) echo "dharma wrapper: unsupported architecture: $arch" >&2; exit 1 ;;
+esac
+
+bin="$root/bin/dharma-$os-$arch"
+if [ ! -f "$bin" ]; then
+  echo "dharma wrapper: no binary for $os/$arch at $bin (re-run scripts/install-cowork-plugin.sh)" >&2
+  exit 1
+fi
+
+# Exec bits can get lost when plugin files are synced into the Cowork VM.
+if [ ! -x "$bin" ]; then
+  cp "$bin" /tmp/dharma-real && chmod +x /tmp/dharma-real
+  bin=/tmp/dharma-real
+fi
+
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$root/config}"
+export XDG_CONFIG_HOME
+exec "$bin" "$@"
