@@ -23,9 +23,13 @@ for (const key of ["ASANA_TOKEN", "ASANA_WORKSPACE"]) {
 }
 // A pasted workspace setting that isn't a gid would surface as opaque 400s on
 // every call; drop it so auto-detection (or its instructive multi-workspace
-// error) takes over instead.
+// error) takes over instead — but remember, so that error can explain why the
+// setting the user thinks they configured isn't in effect.
+let discardedWorkspaceSetting = false;
 if (process.env.ASANA_WORKSPACE && !/^\d+$/.test(process.env.ASANA_WORKSPACE)) {
   delete process.env.ASANA_WORKSPACE;
+  discardedWorkspaceSetting = true;
+  console.error("dharma-asana: ignoring configured Workspace GID — not a numeric gid");
 }
 
 let dharmaBin = path.join(here, "..", "bin", "dharma");
@@ -42,8 +46,9 @@ try {
     fs.chmodSync(dharmaBin, 0o755);
   } catch {
     // Read-only install dir: heal to a stable tmp name via unique copy +
-    // atomic rename — concurrent or restarting servers never see a partial
-    // copy, and an older process keeps executing its own inode.
+    // atomic rename, so a concurrent or restarting server never sees a
+    // partial copy. (In-flight execs are safe; the stable name itself is
+    // shared across server instances and versions.)
     const healed = path.join(os.tmpdir(), "dharma-mcpb-bin");
     const tmp = `${healed}.${process.pid}`;
     fs.copyFileSync(dharmaBin, tmp);
@@ -88,7 +93,10 @@ async function fetchSingleWorkspace() {
     throw new Error(
       `your Asana token can see multiple workspaces: ${names}. ` +
         `Ask the user to set "Workspace GID" in this extension's settings ` +
-        `(Claude Desktop → Settings → Extensions → Asana (dharma)) to the gid of the one to use.`
+        `(Claude Desktop → Settings → Extensions → Asana (dharma)) to the gid of the one to use.` +
+        (discardedWorkspaceSetting
+          ? ` Note: the currently configured "Workspace GID" was ignored because it isn't a numeric gid.`
+          : "")
     );
   }
   return workspaces[0].gid;
