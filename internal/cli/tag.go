@@ -25,16 +25,17 @@ var tagListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		ws, err := requireWorkspace(context.Background(), c)
+		ctx := context.Background()
+		ws, err := requireWorkspace(ctx, c)
 		if err != nil {
 			return err
 		}
 		if tagListName != "" {
 			q := url.Values{"resource_type": []string{"tag"}, "query": []string{tagListName}}
-			return runList(context.Background(), c, "/workspaces/"+ws+"/typeahead", q, false)
+			return runList(ctx, c, "/workspaces/"+ws+"/typeahead", q, false)
 		}
 		q := url.Values{"workspace": []string{ws}}
-		return runList(context.Background(), c, "/tags", q, tagListPaginate)
+		return runList(ctx, c, "/tags", q, tagListPaginate)
 	},
 }
 

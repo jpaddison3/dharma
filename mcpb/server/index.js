@@ -18,7 +18,14 @@ const pkg = JSON.parse(fs.readFileSync(path.join(here, "..", "package.json"), "u
 // literal placeholder. Treat both as absent rather than letting them reach
 // the CLI as real values.
 for (const key of ["ASANA_TOKEN", "ASANA_WORKSPACE"]) {
+  if (process.env[key]) process.env[key] = process.env[key].trim();
   if (!process.env[key] || process.env[key].startsWith("${")) delete process.env[key];
+}
+// A pasted workspace setting that isn't a gid would surface as opaque 400s on
+// every call; drop it so auto-detection (or its instructive multi-workspace
+// error) takes over instead.
+if (process.env.ASANA_WORKSPACE && !/^\d+$/.test(process.env.ASANA_WORKSPACE)) {
+  delete process.env.ASANA_WORKSPACE;
 }
 
 let dharmaBin = path.join(here, "..", "bin", "dharma");
@@ -26,16 +33,24 @@ if (!fs.existsSync(dharmaBin)) {
   throw new Error(`bundled dharma binary missing at ${dharmaBin} — run scripts/build-mcpb.sh`);
 }
 
-// Self-heal a lost exec bit (zip extraction doesn't always preserve it). The
-// healed copy is per-process so a restarting server never rewrites a binary
-// an older process is still executing.
+// Self-heal a lost exec bit (zip extraction doesn't always preserve it).
 try {
   fs.accessSync(dharmaBin, fs.constants.X_OK);
 } catch {
-  const healed = path.join(os.tmpdir(), `dharma-mcpb-bin-${process.pid}`);
-  fs.copyFileSync(dharmaBin, healed);
-  fs.chmodSync(healed, 0o755);
-  dharmaBin = healed;
+  try {
+    // Repairing in place fixes the install permanently.
+    fs.chmodSync(dharmaBin, 0o755);
+  } catch {
+    // Read-only install dir: heal to a stable tmp name via unique copy +
+    // atomic rename — concurrent or restarting servers never see a partial
+    // copy, and an older process keeps executing its own inode.
+    const healed = path.join(os.tmpdir(), "dharma-mcpb-bin");
+    const tmp = `${healed}.${process.pid}`;
+    fs.copyFileSync(dharmaBin, tmp);
+    fs.chmodSync(tmp, 0o755);
+    fs.renameSync(tmp, healed);
+    dharmaBin = healed;
+  }
 }
 
 // A path that never exists: dharma treats a missing config file as empty, so
@@ -110,10 +125,14 @@ function asResult(res) {
 const server = new McpServer({ name: "dharma-asana", version: pkg.version });
 
 // Registers a tool whose handler returns a dharma argv (or throws).
+// needsWorkspace may be a boolean or a predicate of the tool's args. Argv
+// builders place "--" before model-supplied positionals so a value starting
+// with "-" can't be parsed as a flag.
 function cliTool(name, description, shape, { needsWorkspace }, buildArgs) {
   server.registerTool(name, { description, inputSchema: shape }, async (args) => {
     try {
-      if (needsWorkspace) await ensureWorkspace();
+      const needs = typeof needsWorkspace === "function" ? needsWorkspace(args) : needsWorkspace;
+      if (needs) await ensureWorkspace();
       return asResult(await runDharma(buildArgs(args)));
     } catch (e) {
       return { content: [{ type: "text", text: String(e.message ?? e) }], isError: true };
@@ -208,24 +227,32 @@ cliTool(
 
 cliTool(
   "list_projects",
-  "List projects in the workspace (first 100; the result notes truncation).",
-  {},
+  "List projects in the workspace (first 100 by default; the result notes truncation).",
+  {
+    paginate: z.boolean().optional().describe("Fetch all pages instead of the first 100"),
+  },
   { needsWorkspace: true },
-  () => ["project", "list"]
+  ({ paginate }) => {
+    const argv = ["project", "list"];
+    if (paginate) argv.push("--paginate");
+    return argv;
+  }
 );
 
 cliTool(
   "list_project_tasks",
-  "List open tasks in a project (first 100; the result notes truncation).",
+  "List open tasks in a project (first 100 by default; the result notes truncation).",
   {
     project_gid: z.string().describe("Project gid"),
     include_completed: z.boolean().optional().describe("Include completed tasks (default false)"),
+    paginate: z.boolean().optional().describe("Fetch all pages instead of the first 100"),
     fields: fieldsSchema,
   },
   { needsWorkspace: false },
-  ({ project_gid, include_completed, fields }) => {
+  ({ project_gid, include_completed, paginate, fields }) => {
     const argv = ["task", "list", "--project", project_gid];
     if (!include_completed) argv.push("--incomplete");
+    if (paginate) argv.push("--paginate");
     if (fields) argv.push("--fields", fields);
     return argv;
   }
@@ -240,7 +267,9 @@ cliTool(
     project_gid: z.string().optional().describe("Project to add the task to; omit to create in My Tasks"),
     assignee: z.string().optional().describe("Assignee user gid, or 'me'"),
   },
-  { needsWorkspace: true },
+  // A project-backed create infers its workspace from the project; only
+  // workspace-level creates need resolution.
+  { needsWorkspace: (args) => !args.project_gid },
   ({ name, notes, project_gid, assignee }) => {
     const argv = ["task", "create", "--name", name];
     if (notes) argv.push("--notes", notes);

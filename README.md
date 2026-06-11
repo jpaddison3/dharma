@@ -78,6 +78,7 @@ Many endpoints need a workspace gid. Resolution order:
 1. `--workspace` flag
 2. `ASANA_WORKSPACE` env var
 3. `default_workspace` in the config file
+4. otherwise resolved via the API: exactly one visible workspace is used automatically (one extra round-trip per command — set `default_workspace` to skip it); several produce an error naming them
 
 ## Cowork plugin
 
@@ -89,7 +90,7 @@ To use dharma from inside [Claude Cowork](https://claude.com/docs/cowork)'s VM, 
 ./scripts/install-cowork-plugin.sh
 ```
 
-This cross-compiles static linux binaries (the Cowork VM is Ubuntu arm64), bundles your local dharma config (PAT + default workspace), and installs everything to `/Library/Application Support/Claude/org-plugins/dharma/` (sudo). Then relaunch Claude Desktop and allow network access to `app.asana.com` when the Cowork session asks.
+This cross-compiles a static linux/arm64 binary (the Cowork VM is Ubuntu arm64), bundles your local dharma config (PAT + default workspace), and installs everything to `/Library/Application Support/Claude/org-plugins/dharma/` (sudo). Then relaunch Claude Desktop and allow network access to `app.asana.com` when the Cowork session asks.
 
 Notes:
 

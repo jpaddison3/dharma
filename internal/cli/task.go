@@ -31,12 +31,13 @@ var (
 
 var taskListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List tasks (requires --section, --project, or --assignee with --workspace)",
+	Short: "List tasks (requires --section, --project, or --assignee)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
+		ctx := context.Background()
 		q := url.Values{}
 		switch {
 		case taskListSection != "":
@@ -44,7 +45,7 @@ var taskListCmd = &cobra.Command{
 		case taskListProject != "":
 			q.Set("project", taskListProject)
 		case taskListAssignee != "":
-			ws, err := requireWorkspace(context.Background(), c)
+			ws, err := requireWorkspace(ctx, c)
 			if err != nil {
 				return err
 			}
@@ -62,7 +63,7 @@ var taskListCmd = &cobra.Command{
 		if taskListIncomplete {
 			q.Set("completed_since", "now")
 		}
-		return runList(context.Background(), c, "/tasks", q, taskListPaginate)
+		return runList(ctx, c, "/tasks", q, taskListPaginate)
 	},
 }
 

@@ -22,12 +22,13 @@ var projectListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		ws, err := requireWorkspace(context.Background(), c)
+		ctx := context.Background()
+		ws, err := requireWorkspace(ctx, c)
 		if err != nil {
 			return err
 		}
 		q := url.Values{"workspace": []string{ws}}
-		return runList(context.Background(), c, "/projects", q, projectListPaginate)
+		return runList(ctx, c, "/projects", q, projectListPaginate)
 	},
 }
 
