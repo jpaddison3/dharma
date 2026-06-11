@@ -9,6 +9,8 @@ Personal CLI for the Asana API. Goal: replace the flaky Asana MCP server with a 
 - `internal/client/` — thin HTTP wrapper; unwraps Asana's `{data: ...}` envelope, surfaces `{errors: [...]}` as typed errors
 - `internal/config/` — `~/.config/dharma/config.json`, 0600
 - `internal/output/` — JSON output (pretty for TTY, compact when piped)
+- `plugin/` — Claude Cowork plugin (manifest, skill, arch-dispatching `bin/dharma` wrapper); binaries and config are bundled at install time by `scripts/install-cowork-plugin.sh`, never committed
+- `mcpb/` — Claude Desktop extension (MCP shim over the CLI for non-technical colleagues); `scripts/build-mcpb.sh` → `dist/dharma.mcpb`; smoke-test with `ASANA_TOKEN=... node mcpb/smoke.mjs`
 
 ## Dev
 

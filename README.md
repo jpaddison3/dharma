@@ -53,6 +53,7 @@ dharma attachment download <gid> --output-dir ./downloads        # uses attachme
 dharma task download-attachments <task-gid> --output-dir ./out   # all attachments on a task
 
 dharma my-tasks list                                  # all tasks assigned to me
+dharma my-tasks list --incomplete                     # only open tasks
 dharma my-tasks list --section "Main Work"            # filtered to a named section
 dharma my-tasks list --paginate --limit 100           # follow all pages
 
@@ -77,6 +78,39 @@ Many endpoints need a workspace gid. Resolution order:
 1. `--workspace` flag
 2. `ASANA_WORKSPACE` env var
 3. `default_workspace` in the config file
+
+## Cowork plugin
+
+To use dharma from inside [Claude Cowork](https://claude.com/docs/cowork)'s VM, install it as a plugin:
+
+```sh
+./scripts/install-cowork-plugin.sh
+```
+
+This cross-compiles static linux binaries (the Cowork VM is Ubuntu arm64), bundles your local dharma config (PAT + default workspace), and installs everything to `/Library/Application Support/Claude/org-plugins/dharma/` (sudo). Then relaunch Claude Desktop and allow network access to `app.asana.com` when the Cowork session asks.
+
+Notes:
+
+- Your PAT is copied into the plugin directory (0600, owned by you). Re-run the script after rotating the token or updating dharma — any run bumps `version.json`, which triggers a plugin resync.
+- The plugin's `skills/dharma/SKILL.md` teaches the agent to call the `bin/dharma` wrapper, which picks the right binary for the VM's architecture and points it at the bundled config.
+
+## Desktop extension (.mcpb)
+
+For sharing with colleagues who don't use a terminal: a Claude Desktop extension that wraps dharma in an MCP shim. Recipients double-click the file, paste an Asana PAT into the settings form (stored in macOS Keychain), and get Asana tools in chat and Cowork — no Node, npm, or terminal needed.
+
+```sh
+./scripts/build-mcpb.sh      # → dist/dharma.mcpb
+```
+
+The bundle contains a universal (arm64 + x86_64) macOS dharma binary, a Node MCP server (`mcpb/server/index.js`) exposing typed tools plus an `asana_api` passthrough, and its node_modules; it runs on the Node runtime bundled inside Claude Desktop. The shim isolates `XDG_CONFIG_HOME`, so it only ever authenticates via the extension's configured token — a local `~/.config/dharma/config.json` can't leak in.
+
+Smoke-test the shim without installing:
+
+```sh
+ASANA_TOKEN=... node mcpb/smoke.mjs
+```
+
+Caveat for distribution: the bundled binary is unsigned. A bundle downloaded via Slack/browser gets macOS quarantine, and Gatekeeper may block the binary on first run on the recipient's machine — test that path before sending it widely.
 
 ## License
 

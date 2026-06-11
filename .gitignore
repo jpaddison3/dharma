@@ -6,3 +6,8 @@
 .env
 .envrc
 dist/
+/plugin/bin/dharma-*
+/plugin/config/
+/plugin/version.json
+/mcpb/bin/
+/mcpb/node_modules/

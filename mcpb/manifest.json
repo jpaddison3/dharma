@@ -1,0 +1,36 @@
+{
+  "manifest_version": "0.3",
+  "name": "dharma-asana",
+  "display_name": "Asana (dharma)",
+  "version": "0.1.0",
+  "description": "Asana tools — My Tasks, task search, comments, projects — backed by the dharma CLI.",
+  "author": {
+    "name": "JP Addison"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "ASANA_TOKEN": "${user_config.asana_token}"
+      }
+    }
+  },
+  "user_config": {
+    "asana_token": {
+      "type": "string",
+      "title": "Asana Personal Access Token",
+      "description": "In Asana, visit https://app.asana.com/0/my-apps → Create new token → copy it and paste it here.",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}
