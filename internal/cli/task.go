@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jpaddison3/dharma/internal/client"
 	"github.com/jpaddison3/dharma/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -75,23 +76,148 @@ var taskListCmd = &cobra.Command{
 	},
 }
 
-var taskGetFields string
+var (
+	taskGetFields    string
+	taskGetNoContext bool
+)
 
 var taskGetCmd = &cobra.Command{
 	Use:   "get <gid>",
-	Short: "Fetch a task",
-	Args:  cobra.ExactArgs(1),
+	Short: "Fetch a task, with a context block summarizing comments/attachments/subtasks",
+	Long: `Fetch a task. By default the response carries a sibling "context" block that
+summarizes things an agent might not think to look for — the comment count
+(one extra stories call, run in parallel), plus attachment names, subtask
+count, and project names pulled free from the task itself. Use --no-context to
+skip the extra call, or --fields to change what the task object returns (the
+context reflects whatever fields come back).`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
+		gid := args[0]
+		ctx := context.Background()
 		q := url.Values{}
 		if taskGetFields != "" {
 			q.Set("opt_fields", taskGetFields)
 		}
-		return runGet(context.Background(), c, "/tasks/"+args[0], q)
+
+		if taskGetNoContext {
+			var task interface{}
+			if err := c.Get(ctx, "/tasks/"+gid, q, &task); err != nil {
+				return err
+			}
+			return output.PrintObject(os.Stdout, task)
+		}
+
+		// Count comments in parallel with the main fetch. A buffered channel
+		// means the goroutine never leaks even if the main fetch errors first.
+		type storiesResult struct {
+			count int
+			err   error
+		}
+		ch := make(chan storiesResult, 1)
+		go func() {
+			n, err := countComments(ctx, c, gid)
+			ch <- storiesResult{n, err}
+		}()
+
+		var task map[string]interface{}
+		if err := c.Get(ctx, "/tasks/"+gid, q, &task); err != nil {
+			return err
+		}
+
+		sr := <-ch
+		var commentCount *int
+		if sr.err != nil {
+			// Degrade: the task itself is fine, so don't fail the command —
+			// note the miss on stderr and leave comments null.
+			fmt.Fprintf(os.Stderr, "warning: could not count comments: %v\n", sr.err)
+		} else {
+			commentCount = &sr.count
+		}
+		return output.PrintObjectWithContext(os.Stdout, task, buildTaskContext(gid, task, commentCount))
 	},
+}
+
+// countComments tallies comment_added stories on a task, requesting only
+// resource_subtype to keep each page tiny. Pages fully (capped well above any
+// realistic task) so recent comments on later pages aren't missed.
+func countComments(ctx context.Context, c *client.Client, gid string) (int, error) {
+	q := url.Values{}
+	q.Set("opt_fields", "resource_subtype")
+	q.Set("limit", "100")
+	const maxPages = 10
+	count := 0
+	for page := 0; page < maxPages; page++ {
+		resp, err := c.Do(ctx, "GET", "/tasks/"+gid+"/stories", q, nil)
+		if err != nil {
+			return 0, err
+		}
+		var stories []struct {
+			ResourceSubtype string `json:"resource_subtype"`
+		}
+		if err := json.Unmarshal(resp.Data, &stories); err != nil {
+			return 0, err
+		}
+		for _, s := range stories {
+			if s.ResourceSubtype == "comment_added" {
+				count++
+			}
+		}
+		if resp.NextPage == nil || resp.NextPage.Offset == "" {
+			break
+		}
+		q.Set("offset", resp.NextPage.Offset)
+	}
+	return count, nil
+}
+
+// buildTaskContext assembles the context block from the fetched task plus the
+// (possibly nil) comment count. Fields absent from the task object — because
+// --fields narrowed them out — are omitted rather than reported as empty, so
+// the block never claims "no attachments" when it simply didn't ask.
+func buildTaskContext(gid string, task map[string]interface{}, commentCount *int) map[string]interface{} {
+	block := map[string]interface{}{}
+	if commentCount != nil {
+		block["comments"] = *commentCount
+	} else {
+		block["comments"] = nil // stories call failed
+	}
+	if v, present := task["attachments"]; present {
+		block["attachments"] = extractNames(v)
+	}
+	if v, present := task["num_subtasks"]; present {
+		if n, ok := v.(float64); ok {
+			block["subtasks"] = int(n)
+		}
+	}
+	if v, present := task["projects"]; present {
+		block["projects"] = extractNames(v)
+	}
+	if commentCount != nil && *commentCount > 0 {
+		block["hint"] = fmt.Sprintf("dharma task stories %s — read the %d comment(s)", gid, *commentCount)
+	}
+	return block
+}
+
+// extractNames pulls the "name" of each object in a JSON array (decoded as
+// []interface{} of map[string]interface{}), returning a non-nil slice.
+func extractNames(v interface{}) []string {
+	names := []string{}
+	arr, ok := v.([]interface{})
+	if !ok {
+		return names
+	}
+	for _, item := range arr {
+		if m, ok := item.(map[string]interface{}); ok {
+			if name, ok := m["name"].(string); ok {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
 }
 
 var (
@@ -468,6 +594,7 @@ func init() {
 	taskListCmd.Flags().BoolVar(&taskListIncomplete, "incomplete", false, "only tasks not yet completed (completed_since=now)")
 
 	taskGetCmd.Flags().StringVar(&taskGetFields, "fields", defaultTaskGetFields, "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
+	taskGetCmd.Flags().BoolVar(&taskGetNoContext, "no-context", false, "skip the context block (avoids the extra comment-count call)")
 
 	taskCreateCmd.Flags().StringVar(&taskCreateName, "name", "", "task name (required)")
 	taskCreateCmd.Flags().StringArrayVar(&taskCreateProjects, "project", nil, "project gid (repeatable)")

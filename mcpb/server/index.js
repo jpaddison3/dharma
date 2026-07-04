@@ -214,7 +214,7 @@ cliTool(
 
 cliTool(
   "get_task",
-  "Get a single task by gid.",
+  "Get a single task by gid. Returns {ok,data,context}, where context summarizes the comment count, attachment names, subtask count, and project names — read it to decide what to follow up on (e.g. task_stories when comments > 0) without extra calls.",
   {
     task_gid: z.string().describe("Task gid"),
     fields: fieldsSchema,

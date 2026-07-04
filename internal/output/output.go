@@ -36,6 +36,12 @@ type objectEnvelope struct {
 	Data interface{} `json:"data"`
 }
 
+type objectContextEnvelope struct {
+	OK      bool        `json:"ok"`
+	Data    interface{} `json:"data"`
+	Context interface{} `json:"context,omitempty"`
+}
+
 // PrintList wraps a slice in the list envelope:
 //
 //	{"ok":true,"count":N,"has_more":bool,"hint":"...","data":[...]}
@@ -59,4 +65,11 @@ func PrintList(w *os.File, items interface{}, hasMore bool, hint string) error {
 // PrintObject wraps a single value in the object envelope: {"ok":true,"data":{...}}.
 func PrintObject(w *os.File, obj interface{}) error {
 	return Print(w, objectEnvelope{OK: true, Data: obj})
+}
+
+// PrintObjectWithContext is PrintObject plus a sibling `context` block —
+// pre-computed hints (comment count, attachment names, …) that save the caller
+// a round trip. A nil context is omitted, degrading to a plain object envelope.
+func PrintObjectWithContext(w *os.File, obj, context interface{}) error {
+	return Print(w, objectContextEnvelope{OK: true, Data: obj, Context: context})
 }
