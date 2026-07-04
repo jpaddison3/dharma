@@ -17,6 +17,7 @@ var (
 	flagToken     string
 	flagWorkspace string
 	flagVerbose   bool
+	flagOutput    string
 )
 
 // commandRan is set once a command body is reached (after flag/arg parsing
@@ -29,8 +30,15 @@ var rootCmd = &cobra.Command{
 	Short:         "Agent-friendly CLI for the Asana API",
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		switch flagOutput {
+		case "json", "toon":
+			output.Format = flagOutput
+		default:
+			return usageErrorf("--output must be json or toon, got %q", flagOutput)
+		}
 		commandRan = true
+		return nil
 	},
 }
 
@@ -55,6 +63,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagToken, "token", "", "Asana PAT (env: ASANA_TOKEN)")
 	rootCmd.PersistentFlags().StringVar(&flagWorkspace, "workspace", "", "workspace gid (env: ASANA_WORKSPACE)")
 	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "log HTTP requests to stderr")
+	rootCmd.PersistentFlags().StringVar(&flagOutput, "output", "json", "output format: json or toon (experimental)")
 
 	rootCmd.AddCommand(authCmd, apiCmd, userCmd, taskCmd, myTasksCmd, projectCmd, sectionCmd, tagCmd, workspaceCmd, attachmentCmd)
 }

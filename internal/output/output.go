@@ -2,9 +2,14 @@ package output
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 )
+
+// Format selects the output encoding for Print: "json" (default) or the
+// experimental "toon". Set once from the --output flag before any command runs.
+var Format = "json"
 
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
@@ -14,8 +19,23 @@ func isTerminal(f *os.File) bool {
 	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
-// Print JSON-encodes v to w: indented when w is a TTY, compact when piped.
+// Print encodes v to w in the selected Format. JSON is indented on a TTY and
+// compact when piped; TOON is always line-oriented.
 func Print(w *os.File, v interface{}) error {
+	if Format == "toon" {
+		// Normalize through JSON so the TOON encoder sees a uniform
+		// map/slice/scalar tree regardless of v's concrete Go type.
+		b, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		var generic interface{}
+		if err := json.Unmarshal(b, &generic); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(w, encodeTOON(generic))
+		return err
+	}
 	enc := json.NewEncoder(w)
 	if isTerminal(w) {
 		enc.SetIndent("", "  ")

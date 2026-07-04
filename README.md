@@ -82,6 +82,19 @@ Long free text (`task get` notes, `task stories` text) over ~2,000 chars is trun
 
 Exit codes: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments).
 
+### Output format (experimental)
+
+`--output toon` emits [TOON](https://github.com/toon-format/toon) instead of JSON — a line-oriented format that drops repeated object keys. On real Asana payloads (byte proxy for tokens, via `scripts/measure-toon.sh`):
+
+| payload | savings |
+| --- | --- |
+| `my-tasks list` (flat) | ~38% |
+| `project list` (flat) | ~33% |
+| `task get` (nested object) | ~0% |
+| `task list --fields …,assignee.name` (nested rows) | ~0% |
+
+The win is real but only for **flat** list rows; nested rows fall back to inline JSON and single objects break even. It stays opt-in (default `json`): TOON isn't a `jq` target (`.data[]` won't work), and the mcpb shim parses JSON, so don't pipe TOON into either.
+
 ### Fields
 
 List and `get` commands send a curated `--fields` (opt_fields) set by default — small but useful, and it also strips Asana's `resource_type` noise. Override with `--fields a,b,c`, or `--fields ""` for Asana's raw representation. Note that Asana **silently ignores** unknown or misspelled opt_fields (a typo yields a bare `{"gid": ...}` with no error), so check spelling if a field you expect is missing.
