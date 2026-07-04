@@ -634,11 +634,7 @@ truncated with an inline marker (and "text" listed in truncated_fields); pass
 				truncatedFields = []string{"text"}
 			}
 		}
-		hint := ""
-		if hasMore {
-			hint = paginateHint
-		}
-		return output.PrintListFull(os.Stdout, all, hasMore, hint, truncatedFields)
+		return output.PrintListFull(os.Stdout, all, hasMore, paginateHintFor(hasMore), truncatedFields)
 	},
 }
 

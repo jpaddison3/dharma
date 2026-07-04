@@ -12,9 +12,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// paginateHint is the list hint shown when a next page exists but --paginate
-// wasn't passed. Shared so the call sites (runList and task stories) can't drift.
-const paginateHint = "more pages exist — rerun with --paginate to fetch all"
+// paginateHintFor returns the list hint shown when a next page exists but
+// --paginate wasn't passed, or "" otherwise. One home for both the string and
+// the hasMore→hint derivation so the call sites (runList, task stories) can't drift.
+func paginateHintFor(hasMore bool) string {
+	if hasMore {
+		return "more pages exist — rerun with --paginate to fetch all"
+	}
+	return ""
+}
 
 // fieldsFlagUsage is the one usage string for every curated --fields flag, so
 // the empty-string escape hatch is documented identically everywhere.
@@ -93,9 +99,5 @@ func runList(ctx context.Context, c *client.Client, path string, q url.Values, p
 	if err != nil {
 		return err
 	}
-	hint := ""
-	if hasMore {
-		hint = paginateHint
-	}
-	return output.PrintList(os.Stdout, all, hasMore, hint)
+	return output.PrintList(os.Stdout, all, hasMore, paginateHintFor(hasMore))
 }

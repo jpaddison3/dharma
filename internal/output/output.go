@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"reflect"
 )
 
 // Format selects the output encoding for Print: "json" (default) or the
@@ -65,25 +64,18 @@ type objectContextEnvelope struct {
 //
 // count is derived from the slice length; hint is omitted when empty. A nil
 // slice is normalized to [] so data is never JSON null.
-func PrintList(w *os.File, items interface{}, hasMore bool, hint string) error {
+func PrintList[T any](w *os.File, items []T, hasMore bool, hint string) error {
 	return PrintListFull(w, items, hasMore, hint, nil)
 }
 
 // PrintListFull is PrintList plus truncatedFields — names of fields shortened
 // in one or more items (omitted when nil), so a consumer can detect truncation
 // without scanning the in-string markers.
-func PrintListFull(w *os.File, items interface{}, hasMore bool, hint string, truncatedFields []string) error {
-	count := 0
-	if items != nil {
-		rv := reflect.ValueOf(items)
-		if rv.Kind() == reflect.Slice {
-			count = rv.Len()
-			if rv.IsNil() {
-				items = reflect.MakeSlice(rv.Type(), 0, 0).Interface()
-			}
-		}
+func PrintListFull[T any](w *os.File, items []T, hasMore bool, hint string, truncatedFields []string) error {
+	if items == nil {
+		items = []T{} // never emit JSON null for an empty list
 	}
-	return Print(w, listEnvelope{OK: true, Count: count, HasMore: hasMore, Hint: hint, TruncatedFields: truncatedFields, Data: items})
+	return Print(w, listEnvelope{OK: true, Count: len(items), HasMore: hasMore, Hint: hint, TruncatedFields: truncatedFields, Data: items})
 }
 
 // PrintObject wraps a single value in the object envelope: {"ok":true,"data":{...}}.
