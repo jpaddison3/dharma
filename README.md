@@ -66,7 +66,15 @@ dharma api -X PUT /tasks/123 --body '{"data": {"completed": true}}'
 
 ### Output
 
-JSON to stdout: pretty when stdout is a TTY, compact when piped. Errors go to stderr with non-zero exit code.
+JSON to stdout: pretty when stdout is a TTY, compact when piped.
+
+On failure, dharma prints a structured error to stdout and a one-line summary to stderr:
+
+```json
+{"ok": false, "error": {"message": "Not Authorized", "http_status": 401, "help": "..."}}
+```
+
+Exit codes: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments).
 
 ### `-f` semantics for `dharma api`
 

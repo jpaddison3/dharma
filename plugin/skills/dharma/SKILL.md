@@ -45,7 +45,9 @@ For endpoints without a typed command, `dharma api` works like `gh api` (`"$DHAR
 
 ## Conventions
 
-- Output is JSON on stdout (compact when piped); errors go to stderr with a non-zero exit code.
+- **Output** is JSON on stdout (compact when piped). On failure the CLI prints `{"ok": false, "error": {"message", "http_status"?, "help"?}}` to stdout and a one-line `Error: …` to stderr.
+- **Exit codes**: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments). Branch on the exit code rather than scraping text.
+- **Not idempotent**: `task create` and `task comment` POST new objects and Asana has no dedupe key — if a call times out, verify with `task search` / `task stories` before retrying, or you may create a duplicate.
 - Asana gids are opaque strings — never invent one; get them from list/search output.
 - Use `--fields` to keep payloads small; default field sets are minimal.
 - The default workspace comes from the bundled config; override with `--workspace <gid>` if needed.

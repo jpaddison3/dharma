@@ -52,7 +52,7 @@ var taskListCmd = &cobra.Command{
 			q.Set("workspace", ws)
 			q.Set("assignee", taskListAssignee)
 		default:
-			return fmt.Errorf("provide --section, --project, or --assignee")
+			return usageErrorf("provide --section, --project, or --assignee")
 		}
 		if taskListLimit > 0 {
 			q.Set("limit", strconv.Itoa(taskListLimit))
@@ -102,7 +102,7 @@ var taskCreateCmd = &cobra.Command{
 			return err
 		}
 		if taskCreateName == "" {
-			return fmt.Errorf("--name is required")
+			return usageErrorf("--name is required")
 		}
 		body := map[string]interface{}{"name": taskCreateName}
 		if len(taskCreateProjects) > 0 {
@@ -132,7 +132,7 @@ var taskCommentCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskCommentText == "" {
-			return fmt.Errorf("--text is required")
+			return usageErrorf("--text is required")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -150,7 +150,7 @@ var taskMoveCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskMoveSection == "" {
-			return fmt.Errorf("--section is required (a section gid)")
+			return usageErrorf("--section is required (a section gid)")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -171,7 +171,7 @@ var taskAddToProjectCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskAddToProjectProject == "" {
-			return fmt.Errorf("--project is required")
+			return usageErrorf("--project is required")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -193,7 +193,7 @@ var taskRemoveFromProjectCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskRemoveFromProjectProject == "" {
-			return fmt.Errorf("--project is required")
+			return usageErrorf("--project is required")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -211,7 +211,7 @@ var taskAddTagCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskAddTagTag == "" {
-			return fmt.Errorf("--tag is required (a tag gid)")
+			return usageErrorf("--tag is required (a tag gid)")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -229,7 +229,7 @@ var taskRenameCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskRenameName == "" {
-			return fmt.Errorf("--name is required")
+			return usageErrorf("--name is required")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -264,10 +264,10 @@ var taskSetDueCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskSetDueClear && taskSetDueDate != "" {
-			return fmt.Errorf("--clear and --due are mutually exclusive")
+			return usageErrorf("--clear and --due are mutually exclusive")
 		}
 		if !taskSetDueClear && taskSetDueDate == "" {
-			return fmt.Errorf("--due is required (YYYY-MM-DD, today, tomorrow, or ISO datetime), or use --clear")
+			return usageErrorf("--due is required (YYYY-MM-DD, today, tomorrow, or ISO datetime), or use --clear")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -306,10 +306,10 @@ var taskAssignCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskAssignClear && taskAssignTo != "" {
-			return fmt.Errorf("--clear and --to are mutually exclusive")
+			return usageErrorf("--clear and --to are mutually exclusive")
 		}
 		if !taskAssignClear && taskAssignTo == "" {
-			return fmt.Errorf("--to is required (user gid or 'me'), or use --clear")
+			return usageErrorf("--to is required (user gid or 'me'), or use --clear")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -334,7 +334,7 @@ var taskSetNotesCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !cmd.Flags().Changed("notes") {
-			return fmt.Errorf("--notes is required (pass \"\" to clear)")
+			return usageErrorf("--notes is required (pass \"\" to clear)")
 		}
 		c, err := newClient()
 		if err != nil {

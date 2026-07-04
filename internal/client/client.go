@@ -41,17 +41,38 @@ type ErrorDetail struct {
 }
 
 func (e *APIError) Error() string {
+	if msg := e.Message(); msg != "" {
+		return fmt.Sprintf("asana api: HTTP %d: %s", e.StatusCode, msg)
+	}
+	return fmt.Sprintf("asana api: HTTP %d", e.StatusCode)
+}
+
+// IsAuth reports whether this is an authentication failure (HTTP 401).
+func (e *APIError) IsAuth() bool { return e.StatusCode == 401 }
+
+// Message returns the cleanest human message Asana provided, without the
+// "asana api: HTTP N:" prefix that Error() adds. Empty only if Asana gave
+// neither a structured error nor a body.
+func (e *APIError) Message() string {
 	if len(e.Errors) > 0 {
-		return fmt.Sprintf("asana api: HTTP %d: %s", e.StatusCode, e.Errors[0].Message)
+		return e.Errors[0].Message
 	}
 	if e.RawBody != "" {
 		body := e.RawBody
 		if len(body) > 200 {
 			body = body[:200] + "..."
 		}
-		return fmt.Sprintf("asana api: HTTP %d: %s", e.StatusCode, body)
+		return body
 	}
-	return fmt.Sprintf("asana api: HTTP %d", e.StatusCode)
+	return ""
+}
+
+// HelpText returns Asana's actionable help string for this error, if any.
+func (e *APIError) HelpText() string {
+	if len(e.Errors) > 0 {
+		return e.Errors[0].Help
+	}
+	return ""
 }
 
 type Response struct {

@@ -117,8 +117,16 @@ async function ensureWorkspace() {
 
 function asResult(res) {
   if (!res.ok) {
+    // On failure dharma writes a structured {"ok":false,"error":{...}} envelope
+    // to stdout and a one-line summary to stderr. Prefer the structured stdout
+    // so the model gets http_status / help; fall back to stderr if it's absent.
     return {
-      content: [{ type: "text", text: res.stderr.trim() || res.error || "dharma failed with no output" }],
+      content: [
+        {
+          type: "text",
+          text: res.stdout.trim() || res.stderr.trim() || res.error || "dharma failed with no output",
+        },
+      ],
       isError: true,
     };
   }

@@ -41,7 +41,7 @@ re-fetched once and the download retried.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if (attachmentDownloadOutput == "") == (attachmentDownloadOutputDir == "") {
-			return fmt.Errorf("pass exactly one of --output or --output-dir")
+			return usageErrorf("pass exactly one of --output or --output-dir")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -67,7 +67,7 @@ non-zero if any download failed.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskDownloadAttachmentsDir == "" {
-			return fmt.Errorf("--output-dir is required")
+			return usageErrorf("--output-dir is required")
 		}
 		c, err := newClient()
 		if err != nil {

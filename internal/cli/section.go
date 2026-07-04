@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/spf13/cobra"
 )
@@ -22,7 +21,7 @@ var sectionListCmd = &cobra.Command{
 	Short: "List sections in a project",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if sectionListProject == "" {
-			return fmt.Errorf("--project is required")
+			return usageErrorf("--project is required")
 		}
 		c, err := newClient()
 		if err != nil {

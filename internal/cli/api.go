@@ -49,7 +49,7 @@ raw JSON through unchanged.`,
 		hasBody := method != "GET" && method != "DELETE" && method != "HEAD"
 
 		if apiPaginate && method != "GET" {
-			return fmt.Errorf("--paginate is only supported for GET requests")
+			return usageErrorf("--paginate is only supported for GET requests")
 		}
 
 		var body interface{}
@@ -59,11 +59,11 @@ raw JSON through unchanged.`,
 		switch {
 		case apiRawBody != "":
 			if !hasBody {
-				return fmt.Errorf("--body is not valid for %s requests", method)
+				return usageErrorf("--body is not valid for %s requests", method)
 			}
 			var v interface{}
 			if err := json.Unmarshal([]byte(apiRawBody), &v); err != nil {
-				return fmt.Errorf("invalid --body JSON: %w", err)
+				return usageErrorf("invalid --body JSON: %v", err)
 			}
 			rawBody = []byte(apiRawBody)
 		case len(apiFields) > 0:
@@ -72,7 +72,7 @@ raw JSON through unchanged.`,
 				for _, f := range apiFields {
 					k, v, ok := strings.Cut(f, "=")
 					if !ok {
-						return fmt.Errorf("--field must be key=value, got %q", f)
+						return usageErrorf("--field must be key=value, got %q", f)
 					}
 					m[k] = v
 				}
@@ -81,7 +81,7 @@ raw JSON through unchanged.`,
 				for _, f := range apiFields {
 					k, v, ok := strings.Cut(f, "=")
 					if !ok {
-						return fmt.Errorf("--field must be key=value, got %q", f)
+						return usageErrorf("--field must be key=value, got %q", f)
 					}
 					query.Add(k, v)
 				}
