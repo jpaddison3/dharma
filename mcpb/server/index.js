@@ -218,11 +218,13 @@ cliTool(
   {
     task_gid: z.string().describe("Task gid"),
     fields: fieldsSchema,
+    full: z.boolean().optional().describe("Return full notes without truncation"),
   },
   { needsWorkspace: false },
-  ({ task_gid, fields }) => {
+  ({ task_gid, fields, full }) => {
     const argv = ["task", "get"];
     if (fields) argv.push("--fields", fields);
+    if (full) argv.push("--full");
     argv.push("--", task_gid);
     return argv;
   }
@@ -230,15 +232,17 @@ cliTool(
 
 cliTool(
   "task_stories",
-  "Get a task's stories (comments and activity history). Fields default to type,text,created_at,created_by.name.",
+  "Get a task's stories (comments and activity history). Fields default to type,text,created_at,created_by.name. Long comment text is truncated (see truncated_fields); pass full for complete text.",
   {
     task_gid: z.string().describe("Task gid"),
     fields: fieldsSchema,
+    full: z.boolean().optional().describe("Return full comment text without truncation"),
   },
   { needsWorkspace: false },
-  ({ task_gid, fields }) => {
+  ({ task_gid, fields, full }) => {
     const argv = ["task", "stories"];
     if (fields) argv.push("--fields", fields);
+    if (full) argv.push("--full");
     argv.push("--", task_gid);
     return argv;
   }

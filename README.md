@@ -76,6 +76,8 @@ A JSON envelope to stdout: pretty when stdout is a TTY, compact when piped.
   {"ok": false, "error": {"message": "Not Authorized", "http_status": 401, "help": "..."}}
   ```
 
+Long free text (`task get` notes, `task stories` text) over ~2,000 chars is truncated with an inline `… (truncated, N chars total — rerun with --full)` marker and named in a top-level `truncated_fields`; pass `--full` for the complete text.
+
 `dharma api` is the exception — it passes Asana's raw response through unchanged, no envelope.
 
 Exit codes: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments).

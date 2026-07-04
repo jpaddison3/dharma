@@ -3,7 +3,44 @@ package cli
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
+
+func TestTruncateText(t *testing.T) {
+	if s, was := truncateText("short"); was || s != "short" {
+		t.Errorf("short string changed: %q was=%v", s, was)
+	}
+
+	exact := strings.Repeat("a", truncateLimit)
+	if s, was := truncateText(exact); was || s != exact {
+		t.Errorf("at-limit string changed: was=%v", was)
+	}
+
+	long := strings.Repeat("a", truncateLimit+500)
+	s, was := truncateText(long)
+	if !was {
+		t.Fatal("over-limit string not truncated")
+	}
+	if !strings.Contains(s, "truncated, 2500 chars total") {
+		t.Errorf("marker/count wrong: %q", s)
+	}
+	if !strings.HasSuffix(s, "rerun with --full)") {
+		t.Errorf("suffix wrong: %q", s)
+	}
+
+	// Multibyte: must not split a rune, and count is runes not bytes.
+	multi := strings.Repeat("é", truncateLimit+300) // 2 bytes per rune
+	ms, mwas := truncateText(multi)
+	if !mwas {
+		t.Fatal("multibyte over-limit not truncated")
+	}
+	if !utf8.ValidString(ms) {
+		t.Error("truncated multibyte string is not valid UTF-8")
+	}
+	if !strings.Contains(ms, "truncated, 2300 chars total") {
+		t.Errorf("multibyte count wrong: %q", ms)
+	}
+}
 
 func TestExtractNames(t *testing.T) {
 	got := extractNames([]interface{}{

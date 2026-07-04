@@ -79,6 +79,7 @@ var taskListCmd = &cobra.Command{
 var (
 	taskGetFields    string
 	taskGetNoContext bool
+	taskGetFull      bool
 )
 
 var taskGetCmd = &cobra.Command{
@@ -89,7 +90,10 @@ summarizes things an agent might not think to look for — the comment count
 (one extra stories call, run in parallel), plus attachment names, subtask
 count, and project names pulled free from the task itself. Use --no-context to
 skip the extra call, or --fields to change what the task object returns (the
-context reflects whatever fields come back).`,
+context reflects whatever fields come back).
+
+Long notes are truncated with an inline marker (and named in truncated_fields);
+pass --full to get the untruncated text.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
@@ -103,42 +107,73 @@ context reflects whatever fields come back).`,
 			q.Set("opt_fields", taskGetFields)
 		}
 
+		var task map[string]interface{}
+		var contextBlock interface{}
+
 		if taskGetNoContext {
-			var task interface{}
 			if err := c.Get(ctx, "/tasks/"+gid, q, &task); err != nil {
 				return err
 			}
-			return output.PrintObject(os.Stdout, task)
-		}
-
-		// Count comments in parallel with the main fetch. A buffered channel
-		// means the goroutine never leaks even if the main fetch errors first.
-		type storiesResult struct {
-			count int
-			err   error
-		}
-		ch := make(chan storiesResult, 1)
-		go func() {
-			n, err := countComments(ctx, c, gid)
-			ch <- storiesResult{n, err}
-		}()
-
-		var task map[string]interface{}
-		if err := c.Get(ctx, "/tasks/"+gid, q, &task); err != nil {
-			return err
-		}
-
-		sr := <-ch
-		var commentCount *int
-		if sr.err != nil {
-			// Degrade: the task itself is fine, so don't fail the command —
-			// note the miss on stderr and leave comments null.
-			fmt.Fprintf(os.Stderr, "warning: could not count comments: %v\n", sr.err)
 		} else {
-			commentCount = &sr.count
+			// Count comments in parallel with the main fetch. A buffered channel
+			// means the goroutine never leaks even if the main fetch errors first.
+			type storiesResult struct {
+				count int
+				err   error
+			}
+			ch := make(chan storiesResult, 1)
+			go func() {
+				n, err := countComments(ctx, c, gid)
+				ch <- storiesResult{n, err}
+			}()
+
+			if err := c.Get(ctx, "/tasks/"+gid, q, &task); err != nil {
+				return err
+			}
+
+			sr := <-ch
+			var commentCount *int
+			if sr.err != nil {
+				// Degrade: the task itself is fine, so don't fail the command —
+				// note the miss on stderr and leave comments null.
+				fmt.Fprintf(os.Stderr, "warning: could not count comments: %v\n", sr.err)
+			} else {
+				commentCount = &sr.count
+			}
+			contextBlock = buildTaskContext(gid, task, commentCount)
 		}
-		return output.PrintObjectWithContext(os.Stdout, task, buildTaskContext(gid, task, commentCount))
+
+		var truncatedFields []string
+		if !taskGetFull {
+			if notes, ok := task["notes"].(string); ok {
+				if shortened, was := truncateText(notes); was {
+					task["notes"] = shortened
+					truncatedFields = append(truncatedFields, "notes")
+				}
+			}
+		}
+		return output.PrintObjectFull(os.Stdout, task, contextBlock, truncatedFields)
 	},
+}
+
+// truncateLimit caps long free-text fields (notes, story text) at this many
+// runes before an inline marker is appended. Tunable; chosen to keep a task or
+// comment readable without dumping a whole document into context.
+const truncateLimit = 2000
+
+// truncateText shortens s to truncateLimit runes (UTF-8 safe, never splitting a
+// multibyte rune) with an inline marker naming the full length. Returns the
+// possibly-shortened string and whether it changed.
+func truncateText(s string) (string, bool) {
+	// Bytes >= runes, so a short byte length rules out truncation cheaply.
+	if len(s) <= truncateLimit {
+		return s, false
+	}
+	runes := []rune(s)
+	if len(runes) <= truncateLimit {
+		return s, false
+	}
+	return fmt.Sprintf("%s… (truncated, %d chars total — rerun with --full)", string(runes[:truncateLimit]), len(runes)), true
 }
 
 // countComments tallies comment_added stories on a task, requesting only
@@ -565,12 +600,16 @@ may have been truncated.`,
 var (
 	taskStoriesFields   string
 	taskStoriesPaginate bool
+	taskStoriesFull     bool
 )
 
 var taskStoriesCmd = &cobra.Command{
 	Use:   "stories <gid>",
 	Short: "List stories (comments and change log) on a task",
-	Args:  cobra.ExactArgs(1),
+	Long: `List stories (comments and change log) on a task. Long comment text is
+truncated with an inline marker (and "text" listed in truncated_fields); pass
+--full for untruncated text.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
 		if err != nil {
@@ -580,7 +619,34 @@ var taskStoriesCmd = &cobra.Command{
 		if taskStoriesFields != "" {
 			q.Set("opt_fields", taskStoriesFields)
 		}
-		return runList(context.Background(), c, "/tasks/"+args[0]+"/stories", q, taskStoriesPaginate)
+		all, hasMore, err := fetchList(context.Background(), c, "/tasks/"+args[0]+"/stories", q, taskStoriesPaginate)
+		if err != nil {
+			return err
+		}
+		var truncatedFields []string
+		if !taskStoriesFull {
+			truncatedAny := false
+			for _, item := range all {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if text, ok := m["text"].(string); ok {
+					if shortened, was := truncateText(text); was {
+						m["text"] = shortened
+						truncatedAny = true
+					}
+				}
+			}
+			if truncatedAny {
+				truncatedFields = []string{"text"}
+			}
+		}
+		hint := ""
+		if hasMore {
+			hint = "more pages exist — rerun with --paginate to fetch all"
+		}
+		return output.PrintListFull(os.Stdout, all, hasMore, hint, truncatedFields)
 	},
 }
 
@@ -595,6 +661,7 @@ func init() {
 
 	taskGetCmd.Flags().StringVar(&taskGetFields, "fields", defaultTaskGetFields, "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
 	taskGetCmd.Flags().BoolVar(&taskGetNoContext, "no-context", false, "skip the context block (avoids the extra comment-count call)")
+	taskGetCmd.Flags().BoolVar(&taskGetFull, "full", false, "return full notes without truncation")
 
 	taskCreateCmd.Flags().StringVar(&taskCreateName, "name", "", "task name (required)")
 	taskCreateCmd.Flags().StringArrayVar(&taskCreateProjects, "project", nil, "project gid (repeatable)")
@@ -634,6 +701,7 @@ func init() {
 
 	taskStoriesCmd.Flags().StringVar(&taskStoriesFields, "fields", "type,text,created_at,created_by.name", "opt_fields")
 	taskStoriesCmd.Flags().BoolVar(&taskStoriesPaginate, "paginate", false, "fetch all pages")
+	taskStoriesCmd.Flags().BoolVar(&taskStoriesFull, "full", false, "return full comment text without truncation")
 
 	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd, taskSetDueCmd, taskAssignCmd, taskSetNotesCmd, taskSearchCmd, taskStoriesCmd)
 }

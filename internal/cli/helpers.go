@@ -35,7 +35,9 @@ func runPut(ctx context.Context, c *client.Client, path string, body interface{}
 	return output.PrintObject(os.Stdout, v)
 }
 
-func runList(ctx context.Context, c *client.Client, path string, q url.Values, paginate bool) error {
+// fetchList collects an array endpoint's items, following pagination only when
+// paginate is set. hasMore reports that a next page existed but wasn't fetched.
+func fetchList(ctx context.Context, c *client.Client, path string, q url.Values, paginate bool) (items []interface{}, hasMore bool, err error) {
 	if q == nil {
 		q = url.Values{}
 	}
@@ -43,25 +45,30 @@ func runList(ctx context.Context, c *client.Client, path string, q url.Values, p
 		q.Set("limit", "100")
 	}
 	all := []interface{}{}
-	hasMore := false
 	for {
 		resp, err := c.Do(ctx, "GET", path, q, nil)
 		if err != nil {
-			return err
+			return nil, false, err
 		}
 		var chunk []interface{}
 		if err := json.Unmarshal(resp.Data, &chunk); err != nil {
-			return fmt.Errorf("list response was not an array: %w", err)
+			return nil, false, fmt.Errorf("list response was not an array: %w", err)
 		}
 		all = append(all, chunk...)
 		if resp.NextPage == nil || resp.NextPage.Offset == "" {
-			break
+			return all, false, nil
 		}
 		if !paginate {
-			hasMore = true
-			break
+			return all, true, nil
 		}
 		q.Set("offset", resp.NextPage.Offset)
+	}
+}
+
+func runList(ctx context.Context, c *client.Client, path string, q url.Values, paginate bool) error {
+	all, hasMore, err := fetchList(ctx, c, path, q, paginate)
+	if err != nil {
+		return err
 	}
 	hint := ""
 	if hasMore {
