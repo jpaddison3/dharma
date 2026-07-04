@@ -113,7 +113,8 @@ func resolveMyTasksSection(ctx context.Context, c *client.Client, workspace, nam
 
 func init() {
 	myTasksListCmd.Flags().StringVar(&myTasksListSection, "section", "", "section name (e.g. \"Main Work\"); omit for all My Tasks")
-	myTasksListCmd.Flags().StringVar(&myTasksListFields, "fields", "", "opt_fields, e.g. name,assignee.name,due_on")
+	// No assignee.name — every task here is assigned to you.
+	myTasksListCmd.Flags().StringVar(&myTasksListFields, "fields", "name,completed,due_on", "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
 	myTasksListCmd.Flags().IntVar(&myTasksListLimit, "limit", 0, "max items per page (server default if 0)")
 	myTasksListCmd.Flags().BoolVar(&myTasksListPaginate, "paginate", false, "fetch all pages")
 	myTasksListCmd.Flags().BoolVar(&myTasksListIncomplete, "incomplete", false, "only tasks not yet completed (completed_since=now)")

@@ -80,6 +80,10 @@ A JSON envelope to stdout: pretty when stdout is a TTY, compact when piped.
 
 Exit codes: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments).
 
+### Fields
+
+List and `get` commands send a curated `--fields` (opt_fields) set by default — small but useful, and it also strips Asana's `resource_type` noise. Override with `--fields a,b,c`, or `--fields ""` for Asana's raw representation. Note that Asana **silently ignores** unknown or misspelled opt_fields (a typo yields a bare `{"gid": ...}` with no error), so check spelling if a field you expect is missing.
+
 ### `-f` semantics for `dharma api`
 
 `-f key=value` becomes a **query parameter** on GET/DELETE/HEAD and a **JSON body field** (wrapped in Asana's `{"data": ...}` envelope) on POST/PUT/PATCH. `--body` passes raw JSON through unchanged.

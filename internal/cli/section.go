@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"net/url"
 
 	"github.com/spf13/cobra"
 )
@@ -14,6 +15,7 @@ var sectionCmd = &cobra.Command{
 var (
 	sectionListProject  string
 	sectionListPaginate bool
+	sectionListFields   string
 )
 
 var sectionListCmd = &cobra.Command{
@@ -27,12 +29,17 @@ var sectionListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return runList(context.Background(), c, "/projects/"+sectionListProject+"/sections", nil, sectionListPaginate)
+		q := url.Values{}
+		if sectionListFields != "" {
+			q.Set("opt_fields", sectionListFields)
+		}
+		return runList(context.Background(), c, "/projects/"+sectionListProject+"/sections", q, sectionListPaginate)
 	},
 }
 
 func init() {
 	sectionListCmd.Flags().StringVar(&sectionListProject, "project", "", "project gid (required)")
 	sectionListCmd.Flags().BoolVar(&sectionListPaginate, "paginate", false, "fetch all pages")
+	sectionListCmd.Flags().StringVar(&sectionListFields, "fields", "name", "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
 	sectionCmd.AddCommand(sectionListCmd)
 }

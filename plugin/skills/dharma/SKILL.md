@@ -53,5 +53,5 @@ For endpoints without a typed command, `dharma api` works like `gh api` (`"$DHAR
 - **Exit codes**: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments). Branch on the exit code rather than scraping text.
 - **Not idempotent**: `task create` and `task comment` POST new objects and Asana has no dedupe key — if a call times out, verify with `task search` / `task stories` before retrying, or you may create a duplicate.
 - Asana gids are opaque strings — never invent one; get them from list/search output.
-- Use `--fields` to keep payloads small; default field sets are minimal.
+- **Fields**: list/get commands send a curated `--fields` set by default (small but useful). Override with `--fields a,b,c`, or `--fields ""` for Asana's raw representation. Caveat: **Asana silently ignores unknown/misspelled opt_fields** — a typo yields a bare `{"gid": ...}` with no error, so if an expected field is missing, check the spelling.
 - The default workspace comes from the bundled config; override with `--workspace <gid>` if needed.

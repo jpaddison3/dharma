@@ -19,6 +19,14 @@ var taskCmd = &cobra.Command{
 	Short: "Task commands",
 }
 
+// Curated default opt_fields. Passing them keeps payloads small AND strips
+// Asana's resource_type noise (present only when opt_fields is omitted). Pass
+// --fields "" to fall back to Asana's raw default representation.
+const (
+	defaultTaskListFields = "name,completed,due_on,assignee.name"
+	defaultTaskGetFields  = "name,notes,completed,due_on,assignee.name,projects.name,parent.name,num_subtasks,attachments.name,tags.name,permalink_url,created_at,modified_at"
+)
+
 var (
 	taskListAssignee   string
 	taskListProject    string
@@ -455,11 +463,11 @@ func init() {
 	taskListCmd.Flags().StringVar(&taskListProject, "project", "", "project gid")
 	taskListCmd.Flags().StringVar(&taskListSection, "section", "", "section gid")
 	taskListCmd.Flags().IntVar(&taskListLimit, "limit", 0, "max items per page (server default if 0)")
-	taskListCmd.Flags().StringVar(&taskListFields, "fields", "", "opt_fields, e.g. name,assignee.name")
+	taskListCmd.Flags().StringVar(&taskListFields, "fields", defaultTaskListFields, "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
 	taskListCmd.Flags().BoolVar(&taskListPaginate, "paginate", false, "fetch all pages")
 	taskListCmd.Flags().BoolVar(&taskListIncomplete, "incomplete", false, "only tasks not yet completed (completed_since=now)")
 
-	taskGetCmd.Flags().StringVar(&taskGetFields, "fields", "", "opt_fields, e.g. name,assignee.name")
+	taskGetCmd.Flags().StringVar(&taskGetFields, "fields", defaultTaskGetFields, "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
 
 	taskCreateCmd.Flags().StringVar(&taskCreateName, "name", "", "task name (required)")
 	taskCreateCmd.Flags().StringArrayVar(&taskCreateProjects, "project", nil, "project gid (repeatable)")
@@ -494,7 +502,7 @@ func init() {
 	taskSearchCmd.Flags().StringVar(&taskSearchSection, "section", "", "section gid")
 	taskSearchCmd.Flags().StringVar(&taskSearchTag, "tag", "", "tag gid")
 	taskSearchCmd.Flags().StringVar(&taskSearchModifiedSince, "modified-since", "", "ISO 8601 datetime; maps to modified_at.after")
-	taskSearchCmd.Flags().StringVar(&taskSearchFields, "fields", "", "opt_fields, e.g. name,assignee.name,modified_at")
+	taskSearchCmd.Flags().StringVar(&taskSearchFields, "fields", defaultTaskListFields, "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
 	taskSearchCmd.Flags().IntVar(&taskSearchLimit, "limit", 0, "max results (1-100, default 100)")
 
 	taskStoriesCmd.Flags().StringVar(&taskStoriesFields, "fields", "type,text,created_at,created_by.name", "opt_fields")

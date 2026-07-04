@@ -7,7 +7,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var projectListPaginate bool
+var (
+	projectListPaginate bool
+	projectListFields   string
+)
 
 var projectCmd = &cobra.Command{
 	Use:   "project",
@@ -28,11 +31,15 @@ var projectListCmd = &cobra.Command{
 			return err
 		}
 		q := url.Values{"workspace": []string{ws}}
+		if projectListFields != "" {
+			q.Set("opt_fields", projectListFields)
+		}
 		return runList(ctx, c, "/projects", q, projectListPaginate)
 	},
 }
 
 func init() {
 	projectListCmd.Flags().BoolVar(&projectListPaginate, "paginate", false, "fetch all pages")
+	projectListCmd.Flags().StringVar(&projectListFields, "fields", "name,archived", "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
 	projectCmd.AddCommand(projectListCmd)
 }
