@@ -78,7 +78,7 @@ A JSON envelope to stdout: pretty when stdout is a TTY, compact when piped.
 
 Long free text (`task get` notes, `task stories` text) over ~2,000 chars is truncated with an inline `… (truncated, N chars total — rerun with --full)` marker and named in a top-level `truncated_fields`; pass `--full` for the complete text.
 
-`dharma api` is the exception — it passes Asana's raw response through unchanged, no envelope.
+`dharma api` is the exception — on **success** it passes Asana's raw response through unchanged, no envelope. On **failure** it still emits dharma's `{"ok": false, "error": {...}}` envelope and the exit codes below (the structured error and exit code are more useful to a caller than Asana's raw error body), so the raw-passthrough promise covers the success path only.
 
 Exit codes: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments).
 
@@ -94,6 +94,8 @@ Exit codes: `0` success · `1` API/operational error · `2` auth (missing or rej
 | `task list --fields …,assignee.name` (nested rows) | ~0% |
 
 The win is real but only for **flat** list rows; nested rows fall back to inline JSON and single objects break even. It stays opt-in (default `json`): TOON isn't a `jq` target (`.data[]` won't work), and the mcpb shim parses JSON, so don't pipe TOON into either.
+
+`internal/output/toon.go` is a hand-rolled encoder covering the subset dharma emits (tabular flat arrays, inline-JSON fallback, custom quoting) — it is **TOON-ish, not guaranteed byte-compatible** with a spec-compliant parser. Treat the linked spec as the shape it aims at, not a round-trip contract.
 
 ### Fields
 

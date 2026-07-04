@@ -27,14 +27,12 @@ var userMeCmd = &cobra.Command{
 			return err
 		}
 		q := url.Values{}
-		if userMeFields != "" {
-			q.Set("opt_fields", userMeFields)
-		}
+		setOptFields(q, userMeFields)
 		return runGet(context.Background(), c, "/users/me", q)
 	},
 }
 
 func init() {
-	userMeCmd.Flags().StringVar(&userMeFields, "fields", userMeDefaultFields, "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
+	addFieldsFlag(userMeCmd, &userMeFields, userMeDefaultFields)
 	userCmd.AddCommand(userMeCmd)
 }

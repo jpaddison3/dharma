@@ -95,3 +95,54 @@ func TestPrintObject(t *testing.T) {
 		t.Errorf("data = %#v", m["data"])
 	}
 }
+
+// PrintObject delegates to PrintObjectFull with nil context/truncated_fields;
+// both are omitempty, so a bare object envelope must be exactly {ok,data} — no
+// stray context/truncated_fields keys the mcpb shim would then have to handle.
+func TestPrintObjectOmitsContextAndTruncated(t *testing.T) {
+	m := capture(t, func(w *os.File) error {
+		return PrintObject(w, map[string]string{"name": "x"})
+	})
+	if _, present := m["context"]; present {
+		t.Error("context must be omitted when nil")
+	}
+	if _, present := m["truncated_fields"]; present {
+		t.Error("truncated_fields must be omitted when nil")
+	}
+	if len(m) != 2 {
+		t.Errorf("bare object envelope should have only ok+data, got %#v", m)
+	}
+}
+
+// The `context` block and `truncated_fields` are the PR's headline additions and
+// the exact keys agents/the shim read — assert they serialize under those names.
+func TestPrintObjectFullContextAndTruncated(t *testing.T) {
+	m := capture(t, func(w *os.File) error {
+		return PrintObjectFull(w,
+			map[string]interface{}{"name": "x", "notes": "shortened…"},
+			map[string]interface{}{"comments": float64(3)},
+			[]string{"notes"},
+		)
+	})
+	ctx, ok := m["context"].(map[string]interface{})
+	if !ok || ctx["comments"] != float64(3) {
+		t.Errorf("context = %#v", m["context"])
+	}
+	tf, ok := m["truncated_fields"].([]interface{})
+	if !ok || len(tf) != 1 || tf[0] != "notes" {
+		t.Errorf("truncated_fields = %#v", m["truncated_fields"])
+	}
+}
+
+func TestPrintListFullTruncatedFields(t *testing.T) {
+	m := capture(t, func(w *os.File) error {
+		return PrintListFull(w,
+			[]interface{}{map[string]interface{}{"text": "shortened…"}},
+			false, "", []string{"text"},
+		)
+	})
+	tf, ok := m["truncated_fields"].([]interface{})
+	if !ok || len(tf) != 1 || tf[0] != "text" {
+		t.Errorf("truncated_fields = %#v", m["truncated_fields"])
+	}
+}

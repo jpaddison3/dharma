@@ -40,9 +40,7 @@ var myTasksListCmd = &cobra.Command{
 		}
 
 		q := url.Values{}
-		if myTasksListFields != "" {
-			q.Set("opt_fields", myTasksListFields)
-		}
+		setOptFields(q, myTasksListFields)
 		if myTasksListLimit > 0 {
 			q.Set("limit", strconv.Itoa(myTasksListLimit))
 		}
@@ -114,7 +112,7 @@ func resolveMyTasksSection(ctx context.Context, c *client.Client, workspace, nam
 func init() {
 	myTasksListCmd.Flags().StringVar(&myTasksListSection, "section", "", "section name (e.g. \"Main Work\"); omit for all My Tasks")
 	// No assignee.name — every task here is assigned to you.
-	myTasksListCmd.Flags().StringVar(&myTasksListFields, "fields", "name,completed,due_on", "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
+	addFieldsFlag(myTasksListCmd, &myTasksListFields, "name,completed,due_on")
 	myTasksListCmd.Flags().IntVar(&myTasksListLimit, "limit", 0, "max items per page (server default if 0)")
 	myTasksListCmd.Flags().BoolVar(&myTasksListPaginate, "paginate", false, "fetch all pages")
 	myTasksListCmd.Flags().BoolVar(&myTasksListIncomplete, "incomplete", false, "only tasks not yet completed (completed_since=now)")

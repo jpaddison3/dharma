@@ -26,15 +26,13 @@ var workspaceListCmd = &cobra.Command{
 			return err
 		}
 		q := url.Values{}
-		if workspaceListFields != "" {
-			q.Set("opt_fields", workspaceListFields)
-		}
+		setOptFields(q, workspaceListFields)
 		return runList(context.Background(), c, "/workspaces", q, workspaceListPaginate)
 	},
 }
 
 func init() {
 	workspaceListCmd.Flags().BoolVar(&workspaceListPaginate, "paginate", false, "fetch all pages")
-	workspaceListCmd.Flags().StringVar(&workspaceListFields, "fields", "name", "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)")
+	addFieldsFlag(workspaceListCmd, &workspaceListFields, "name")
 	workspaceCmd.AddCommand(workspaceListCmd)
 }

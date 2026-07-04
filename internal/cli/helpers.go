@@ -9,7 +9,30 @@ import (
 
 	"github.com/jpaddison3/dharma/internal/client"
 	"github.com/jpaddison3/dharma/internal/output"
+	"github.com/spf13/cobra"
 )
+
+// paginateHint is the list hint shown when a next page exists but --paginate
+// wasn't passed. Shared so the call sites (runList and task stories) can't drift.
+const paginateHint = "more pages exist — rerun with --paginate to fetch all"
+
+// fieldsFlagUsage is the one usage string for every curated --fields flag, so
+// the empty-string escape hatch is documented identically everywhere.
+const fieldsFlagUsage = "opt_fields (curated default; pass --fields \"\" for Asana's raw fields)"
+
+// addFieldsFlag registers the standard --fields flag (curated default plus the
+// shared usage string) on a list/get command.
+func addFieldsFlag(cmd *cobra.Command, dest *string, defaultVal string) {
+	cmd.Flags().StringVar(dest, "fields", defaultVal, fieldsFlagUsage)
+}
+
+// setOptFields sets opt_fields on q unless fields is empty, in which case Asana
+// returns its raw default representation. One home for the empty-means-raw contract.
+func setOptFields(q url.Values, fields string) {
+	if fields != "" {
+		q.Set("opt_fields", fields)
+	}
+}
 
 func runGet(ctx context.Context, c *client.Client, path string, q url.Values) error {
 	var v interface{}
@@ -72,7 +95,7 @@ func runList(ctx context.Context, c *client.Client, path string, q url.Values, p
 	}
 	hint := ""
 	if hasMore {
-		hint = "more pages exist — rerun with --paginate to fetch all"
+		hint = paginateHint
 	}
 	return output.PrintList(os.Stdout, all, hasMore, hint)
 }

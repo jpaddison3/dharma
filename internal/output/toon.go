@@ -3,7 +3,8 @@ package output
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -29,7 +30,7 @@ func encodeTOON(v interface{}) string {
 }
 
 func writeTOONObject(b *strings.Builder, obj map[string]interface{}, indent int) {
-	for _, k := range sortedKeys(obj) {
+	for _, k := range slices.Sorted(maps.Keys(obj)) {
 		writeTOONField(b, k, obj[k], indent)
 	}
 }
@@ -87,7 +88,7 @@ func uniformFlatFields(arr []interface{}) ([]string, bool) {
 		if !ok {
 			return nil, false
 		}
-		keys := sortedKeys(obj)
+		keys := slices.Sorted(maps.Keys(obj))
 		for _, k := range keys {
 			if !isScalar(obj[k]) {
 				return nil, false
@@ -95,7 +96,7 @@ func uniformFlatFields(arr []interface{}) ([]string, bool) {
 		}
 		if i == 0 {
 			fields = keys
-		} else if !equalStrings(fields, keys) {
+		} else if !slices.Equal(fields, keys) {
 			return nil, false
 		}
 	}
@@ -159,25 +160,4 @@ func toonQuote(s string) string {
 	esc = strings.ReplaceAll(esc, `"`, `\"`)
 	esc = strings.ReplaceAll(esc, "\n", `\n`)
 	return `"` + esc + `"`
-}
-
-func sortedKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

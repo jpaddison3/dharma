@@ -52,11 +52,6 @@ type listEnvelope struct {
 	Data            interface{} `json:"data"`
 }
 
-type objectEnvelope struct {
-	OK   bool        `json:"ok"`
-	Data interface{} `json:"data"`
-}
-
 type objectContextEnvelope struct {
 	OK              bool        `json:"ok"`
 	Data            interface{} `json:"data"`
@@ -92,8 +87,10 @@ func PrintListFull(w *os.File, items interface{}, hasMore bool, hint string, tru
 }
 
 // PrintObject wraps a single value in the object envelope: {"ok":true,"data":{...}}.
+// It is PrintObjectFull with no context/truncated_fields — both omitempty, so the
+// JSON is byte-identical to a bare {ok,data} envelope.
 func PrintObject(w *os.File, obj interface{}) error {
-	return Print(w, objectEnvelope{OK: true, Data: obj})
+	return PrintObjectFull(w, obj, nil, nil)
 }
 
 // PrintObjectFull is PrintObject plus an optional sibling `context` block

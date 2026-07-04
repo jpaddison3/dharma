@@ -50,7 +50,7 @@ For endpoints without a typed command, `dharma api` works like `gh api` (`"$DHAR
   - **Single objects** (get, create, mutations) → `{"ok": true, "data": {...}}`. `task get` also returns a `context` block (comment count, attachment names, subtask count, project names, and a `hint` when there are comments) — read it to decide what to fetch next; `--no-context` skips the extra comment-count call.
   - **Failures** → `{"ok": false, "error": {"message", "http_status"?, "help"?}}` on stdout, plus a one-line `Error: …` on stderr.
   - **Truncation**: long free text (`task get` notes, `task stories` text) over ~2,000 chars is shortened with an inline `… (truncated, N chars total — rerun with --full)` marker, and the field name is listed in a top-level `truncated_fields`. Pass `--full` for the complete text.
-  - `dharma api` is the exception: it passes Asana's raw response through unchanged (no envelope).
+  - `dharma api` is the exception: on success it passes Asana's raw response through unchanged (no envelope). On failure it still returns the `{ok:false,error:{...}}` envelope and the exit codes below — only the success path is raw.
   - `--output toon` is an experimental compact format (~35% smaller on flat lists like my-tasks/project list; ~0% on nested data). Default is `json`; keep `json` when piping to `jq`, since `.data[]` doesn't work on TOON.
 - **Exit codes**: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments). Branch on the exit code rather than scraping text.
 - **Not idempotent**: `task create` and `task comment` POST new objects and Asana has no dedupe key — if a call times out, verify with `task search` / `task stories` before retrying, or you may create a duplicate.
