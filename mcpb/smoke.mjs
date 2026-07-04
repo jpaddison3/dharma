@@ -15,11 +15,12 @@ const transport = new StdioClientTransport({
 const client = new Client({ name: "smoke", version: "0.0.1" });
 await client.connect(transport);
 
-// Successful results may carry a "[dharma warning] ..." suffix (e.g. result
-// truncation); split it off before parsing the JSON payload.
-function parsePayload(result) {
+// Lists come back as an envelope {ok,count,has_more,hint?,data:[...]}. A
+// success may still carry a "[dharma warning] ..." suffix (appended from
+// stderr); split it off before parsing.
+function parseEnvelope(result) {
   const [json, warning] = result.content[0].text.split("\n\n[dharma warning] ");
-  return { data: JSON.parse(json), warning };
+  return { env: JSON.parse(json), warning };
 }
 
 const tools = await client.listTools();
@@ -32,16 +33,16 @@ const mine = await client.callTool({ name: "my_tasks", arguments: { fields: "nam
 if (mine.isError) {
   console.log("my_tasks: ERROR:", mine.content[0].text);
 } else {
-  const { data, warning } = parsePayload(mine);
-  console.log(`my_tasks: ${data.length} tasks${warning ? " (truncation warning surfaced)" : ""}`);
+  const { env } = parseEnvelope(mine);
+  console.log(`my_tasks: ${env.count} tasks${env.has_more ? " (has_more)" : ""}`);
 }
 
 const projects = await client.callTool({ name: "list_projects", arguments: {} });
 if (projects.isError) {
   console.log("list_projects: ERROR:", projects.content[0].text);
 } else {
-  const { data, warning } = parsePayload(projects);
-  console.log(`list_projects: ${data.length} projects${warning ? " (truncation warning surfaced)" : ""}`);
+  const { env } = parseEnvelope(projects);
+  console.log(`list_projects: ${env.count} projects${env.has_more ? " (has_more)" : ""}`);
 }
 
 const bad = await client.callTool({ name: "get_task", arguments: { task_gid: "1" } });

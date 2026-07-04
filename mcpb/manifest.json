@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "dharma-asana",
   "display_name": "Asana (dharma)",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Asana tools — My Tasks, task search, comments, projects — backed by the dharma CLI.",
   "author": {
     "name": "JP Addison"

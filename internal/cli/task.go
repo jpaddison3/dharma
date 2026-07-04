@@ -417,10 +417,14 @@ may have been truncated.`,
 		if err := json.Unmarshal(resp.Data, &results); err != nil {
 			return fmt.Errorf("search response was not an array: %w", err)
 		}
-		if len(results) >= limit {
-			fmt.Fprintf(os.Stderr, "warning: %d results returned (== --limit); the search endpoint has no pagination — narrow filters or use --modified-since to chunk by modification time.\n", len(results))
+		hasMore := len(results) >= limit
+		hint := ""
+		if hasMore {
+			// The search endpoint has no offset pagination, so a full page
+			// likely means truncation. Point at the one workaround.
+			hint = fmt.Sprintf("hit the %d-result cap and search has no pagination — narrow filters, or take the oldest result's modified_at and rerun with --modified-since <that timestamp> to page by modification time", limit)
 		}
-		return output.Print(os.Stdout, results)
+		return output.PrintList(os.Stdout, results, hasMore, hint)
 	},
 }
 

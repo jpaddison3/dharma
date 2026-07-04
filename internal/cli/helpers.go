@@ -16,7 +16,7 @@ func runGet(ctx context.Context, c *client.Client, path string, q url.Values) er
 	if err := c.Get(ctx, path, q, &v); err != nil {
 		return err
 	}
-	return output.Print(os.Stdout, v)
+	return output.PrintObject(os.Stdout, v)
 }
 
 func runPost(ctx context.Context, c *client.Client, path string, body interface{}) error {
@@ -24,7 +24,7 @@ func runPost(ctx context.Context, c *client.Client, path string, body interface{
 	if err := c.Post(ctx, path, body, &v); err != nil {
 		return err
 	}
-	return output.Print(os.Stdout, v)
+	return output.PrintObject(os.Stdout, v)
 }
 
 func runPut(ctx context.Context, c *client.Client, path string, body interface{}) error {
@@ -32,7 +32,7 @@ func runPut(ctx context.Context, c *client.Client, path string, body interface{}
 	if err := c.Put(ctx, path, body, &v); err != nil {
 		return err
 	}
-	return output.Print(os.Stdout, v)
+	return output.PrintObject(os.Stdout, v)
 }
 
 func runList(ctx context.Context, c *client.Client, path string, q url.Values, paginate bool) error {
@@ -43,6 +43,7 @@ func runList(ctx context.Context, c *client.Client, path string, q url.Values, p
 		q.Set("limit", "100")
 	}
 	all := []interface{}{}
+	hasMore := false
 	for {
 		resp, err := c.Do(ctx, "GET", path, q, nil)
 		if err != nil {
@@ -57,10 +58,14 @@ func runList(ctx context.Context, c *client.Client, path string, q url.Values, p
 			break
 		}
 		if !paginate {
-			fmt.Fprintf(os.Stderr, "warning: %d items returned but more pages exist — pass --paginate to fetch all\n", len(all))
+			hasMore = true
 			break
 		}
 		q.Set("offset", resp.NextPage.Offset)
 	}
-	return output.Print(os.Stdout, all)
+	hint := ""
+	if hasMore {
+		hint = "more pages exist — rerun with --paginate to fetch all"
+	}
+	return output.PrintList(os.Stdout, all, hasMore, hint)
 }

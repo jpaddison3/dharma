@@ -66,13 +66,17 @@ dharma api -X PUT /tasks/123 --body '{"data": {"completed": true}}'
 
 ### Output
 
-JSON to stdout: pretty when stdout is a TTY, compact when piped.
+A JSON envelope to stdout: pretty when stdout is a TTY, compact when piped.
 
-On failure, dharma prints a structured error to stdout and a one-line summary to stderr:
+- **Lists** — `{"ok": true, "count": N, "has_more": bool, "hint"?: "...", "data": [...]}`. `has_more: true` means the results were capped (`--paginate` or narrow filters; `hint` says how). Pull rows with `jq '.data[]'`.
+- **Single objects** (get, create, mutations) — `{"ok": true, "data": {...}}`.
+- **Failures** — a structured error to stdout plus a one-line summary to stderr:
 
-```json
-{"ok": false, "error": {"message": "Not Authorized", "http_status": 401, "help": "..."}}
-```
+  ```json
+  {"ok": false, "error": {"message": "Not Authorized", "http_status": 401, "help": "..."}}
+  ```
+
+`dharma api` is the exception — it passes Asana's raw response through unchanged, no envelope.
 
 Exit codes: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments).
 

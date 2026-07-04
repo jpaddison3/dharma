@@ -51,7 +51,7 @@ re-fetched once and the download retried.`,
 		if err != nil {
 			return err
 		}
-		return output.Print(os.Stdout, result)
+		return output.PrintObject(os.Stdout, result)
 	},
 }
 
@@ -88,14 +88,13 @@ non-zero if any download failed.`,
 		if err := json.Unmarshal(resp.Data, &attachments); err != nil {
 			return fmt.Errorf("decode attachment list: %w", err)
 		}
-		if len(attachments) == 0 {
-			fmt.Fprintln(os.Stderr, "no attachments on task")
-			return nil
-		}
 		nameCounts := map[string]int{}
 		for _, a := range attachments {
 			nameCounts[sanitizeFilename(a.Name)]++
 		}
+		// Collect successes and emit a single list envelope, so an empty task
+		// yields {"ok":true,"count":0,"data":[]} rather than a stderr-only note.
+		results := []*downloadResult{}
 		var failed int
 		for _, a := range attachments {
 			outputPath := ""
@@ -108,14 +107,15 @@ non-zero if any download failed.`,
 				fmt.Fprintf(os.Stderr, "attachment %s (%s): %v\n", a.GID, a.Name, err)
 				continue
 			}
-			if err := output.Print(os.Stdout, result); err != nil {
-				return err
-			}
+			results = append(results, result)
 		}
 		if failed > 0 {
-			return fmt.Errorf("%d of %d attachments failed", failed, len(attachments))
+			// Partial/total failure: the error envelope (exit 1) is the whole
+			// stdout payload; per-file causes are on stderr. Successful files
+			// are on disk in --output-dir.
+			return fmt.Errorf("%d of %d attachments failed (%d downloaded — see stderr for causes)", failed, len(attachments), len(results))
 		}
-		return nil
+		return output.PrintList(os.Stdout, results, false, "")
 	},
 }
 

@@ -84,7 +84,10 @@ async function fetchSingleWorkspace() {
   if (!res.ok) {
     throw new Error(`could not list workspaces: ${(res.stderr.trim() || res.error)}`);
   }
-  const workspaces = JSON.parse(res.stdout);
+  // dharma wraps lists as {"ok":true,"count":N,"data":[...]}. Tolerate a bare
+  // array too, so an older/newer CLI can't silently break workspace resolution.
+  const parsed = JSON.parse(res.stdout);
+  const workspaces = Array.isArray(parsed) ? parsed : parsed.data;
   if (!Array.isArray(workspaces) || workspaces.length === 0) {
     throw new Error("no Asana workspaces visible to this token");
   }
@@ -168,7 +171,7 @@ cliTool(
 
 cliTool(
   "my_tasks",
-  "List open tasks in the user's My Tasks (first 100 by default; the result notes truncation). Optionally filter to a named section (e.g. \"Main Work\").",
+  "List open tasks in the user's My Tasks. Returns {ok,count,has_more,data:[...]}; has_more=true means more than the first page exist (set paginate). Optionally filter to a named section (e.g. \"Main Work\").",
   {
     section: z.string().optional().describe("My Tasks section name to filter to"),
     paginate: z.boolean().optional().describe("Fetch all pages instead of the first 100 (can be large)"),
@@ -189,7 +192,7 @@ cliTool(
 
 cliTool(
   "search_tasks",
-  "Search tasks across the workspace by text and filters. Returns at most 100 results; narrow with filters if truncated.",
+  "Search tasks across the workspace by text and filters. Returns {ok,count,has_more,data:[...]} with at most 100 results; has_more=true means the cap was hit — narrow filters (the result's hint field suggests how).",
   {
     text: z.string().optional().describe("Match against task name/description"),
     assignee: z.string().optional().describe("Assignee user gid, or 'me'"),
@@ -243,7 +246,7 @@ cliTool(
 
 cliTool(
   "list_projects",
-  "List projects in the workspace (first 100 by default; the result notes truncation).",
+  "List projects in the workspace. Returns {ok,count,has_more,data:[...]}; has_more=true means more than the first page exist (set paginate).",
   {
     paginate: z.boolean().optional().describe("Fetch all pages instead of the first 100"),
   },
@@ -257,7 +260,7 @@ cliTool(
 
 cliTool(
   "list_project_tasks",
-  "List open tasks in a project (first 100 by default; the result notes truncation).",
+  "List open tasks in a project. Returns {ok,count,has_more,data:[...]}; has_more=true means more than the first page exist (set paginate).",
   {
     project_gid: z.string().describe("Project gid"),
     include_completed: z.boolean().optional().describe("Include completed tasks (default false)"),
