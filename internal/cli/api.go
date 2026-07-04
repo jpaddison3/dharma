@@ -106,7 +106,9 @@ raw JSON through unchanged.`,
 			if resp.NextPage != nil {
 				out["next_page"] = resp.NextPage
 			}
-			return output.Print(os.Stdout, out)
+			// Always JSON: `dharma api` is the raw, jq-safe escape hatch and must
+			// not be TOON-encoded even under --output toon.
+			return output.PrintJSON(os.Stdout, out)
 		}
 
 		var all []json.RawMessage
@@ -125,7 +127,7 @@ raw JSON through unchanged.`,
 			}
 			query.Set("offset", resp.NextPage.Offset)
 		}
-		return output.Print(os.Stdout, map[string]interface{}{"data": all})
+		return output.PrintJSON(os.Stdout, map[string]interface{}{"data": all})
 	},
 }
 

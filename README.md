@@ -48,7 +48,7 @@ dharma task search --text "MINERVA" --completed=false --fields name
 dharma task stories <gid> --fields type,text,created_at,created_by.name
 
 # attachments
-dharma attachment download <gid> --output ./screenshot.png
+dharma attachment download <gid> --output-file ./screenshot.png
 dharma attachment download <gid> --output-dir ./downloads        # uses attachment name
 dharma task download-attachments <task-gid> --output-dir ./out   # all attachments on a task
 
@@ -78,7 +78,7 @@ A JSON envelope to stdout: pretty when stdout is a TTY, compact when piped.
 
 Long free text (`task get` notes, `task stories` text) over ~2,000 chars is truncated with an inline `… (truncated, N chars total — rerun with --full)` marker and named in a top-level `truncated_fields`; pass `--full` for the complete text.
 
-`dharma api` is the exception — on **success** it passes Asana's raw response through unchanged, no envelope. On **failure** it still emits dharma's `{"ok": false, "error": {...}}` envelope and the exit codes below (the structured error and exit code are more useful to a caller than Asana's raw error body), so the raw-passthrough promise covers the success path only.
+`dharma api` is the exception — on **success** it passes Asana's raw response through unchanged, no envelope, and always as JSON (it ignores `--output toon` so the escape hatch stays jq-parseable). On **failure** it still emits dharma's `{"ok": false, "error": {...}}` envelope and the exit codes below (the structured error and exit code are more useful to a caller than Asana's raw error body), so the raw-passthrough promise covers the success path only.
 
 Exit codes: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments).
 

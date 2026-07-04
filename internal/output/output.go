@@ -35,6 +35,13 @@ func Print(w *os.File, v interface{}) error {
 		_, err = fmt.Fprintln(w, encodeTOON(generic))
 		return err
 	}
+	return PrintJSON(w, v)
+}
+
+// PrintJSON encodes v as JSON regardless of the global Format — indented on a
+// TTY, compact when piped. Used by the raw `dharma api` passthrough, which must
+// stay JSON (and jq-parseable) even under --output toon.
+func PrintJSON(w *os.File, v interface{}) error {
 	enc := json.NewEncoder(w)
 	if isTerminal(w) {
 		enc.SetIndent("", "  ")

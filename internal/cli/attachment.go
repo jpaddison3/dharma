@@ -25,29 +25,29 @@ var attachmentCmd = &cobra.Command{
 }
 
 var (
-	attachmentDownloadOutput    string
-	attachmentDownloadOutputDir string
+	attachmentDownloadOutputFile string
+	attachmentDownloadOutputDir  string
 )
 
 var attachmentDownloadCmd = &cobra.Command{
 	Use:   "download <gid>",
 	Short: "Download an attachment to disk",
-	Long: `Download an attachment to disk. Pass exactly one of --output (exact path) or
---output-dir (uses the attachment's name as the filename, sanitized).
+	Long: `Download an attachment to disk. Pass exactly one of --output-file (exact path)
+or --output-dir (uses the attachment's name as the filename, sanitized).
 
 On success, prints one JSON line to stdout: {"attachment_gid","path","bytes"}.
 On signed-URL expiry (HTTP 401/403 from the storage host) the metadata is
 re-fetched once and the download retried.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if (attachmentDownloadOutput == "") == (attachmentDownloadOutputDir == "") {
-			return usageErrorf("pass exactly one of --output or --output-dir")
+		if (attachmentDownloadOutputFile == "") == (attachmentDownloadOutputDir == "") {
+			return usageErrorf("pass exactly one of --output-file or --output-dir")
 		}
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		result, err := downloadAttachment(context.Background(), c, args[0], attachmentDownloadOutput, attachmentDownloadOutputDir)
+		result, err := downloadAttachment(context.Background(), c, args[0], attachmentDownloadOutputFile, attachmentDownloadOutputDir)
 		if err != nil {
 			return err
 		}
@@ -253,7 +253,7 @@ func sanitizeFilename(name string) string {
 }
 
 func init() {
-	attachmentDownloadCmd.Flags().StringVar(&attachmentDownloadOutput, "output", "", "exact output path (creates parent dirs)")
+	attachmentDownloadCmd.Flags().StringVar(&attachmentDownloadOutputFile, "output-file", "", "exact output path (creates parent dirs)")
 	attachmentDownloadCmd.Flags().StringVar(&attachmentDownloadOutputDir, "output-dir", "", "directory; filename comes from attachment name (sanitized)")
 	attachmentCmd.AddCommand(attachmentDownloadCmd)
 
