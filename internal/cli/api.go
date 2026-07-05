@@ -49,7 +49,7 @@ raw JSON through unchanged.`,
 		hasBody := method != "GET" && method != "DELETE" && method != "HEAD"
 
 		if apiPaginate && method != "GET" {
-			return fmt.Errorf("--paginate is only supported for GET requests")
+			return usageErrorf("--paginate is only supported for GET requests")
 		}
 
 		var body interface{}
@@ -59,11 +59,11 @@ raw JSON through unchanged.`,
 		switch {
 		case apiRawBody != "":
 			if !hasBody {
-				return fmt.Errorf("--body is not valid for %s requests", method)
+				return usageErrorf("--body is not valid for %s requests", method)
 			}
 			var v interface{}
 			if err := json.Unmarshal([]byte(apiRawBody), &v); err != nil {
-				return fmt.Errorf("invalid --body JSON: %w", err)
+				return usageErrorf("invalid --body JSON: %v", err)
 			}
 			rawBody = []byte(apiRawBody)
 		case len(apiFields) > 0:
@@ -72,7 +72,7 @@ raw JSON through unchanged.`,
 				for _, f := range apiFields {
 					k, v, ok := strings.Cut(f, "=")
 					if !ok {
-						return fmt.Errorf("--field must be key=value, got %q", f)
+						return usageErrorf("--field must be key=value, got %q", f)
 					}
 					m[k] = v
 				}
@@ -81,7 +81,7 @@ raw JSON through unchanged.`,
 				for _, f := range apiFields {
 					k, v, ok := strings.Cut(f, "=")
 					if !ok {
-						return fmt.Errorf("--field must be key=value, got %q", f)
+						return usageErrorf("--field must be key=value, got %q", f)
 					}
 					query.Add(k, v)
 				}
@@ -106,7 +106,9 @@ raw JSON through unchanged.`,
 			if resp.NextPage != nil {
 				out["next_page"] = resp.NextPage
 			}
-			return output.Print(os.Stdout, out)
+			// Always JSON: `dharma api` is the raw, jq-safe escape hatch and must
+			// not be TOON-encoded even under --output toon.
+			return output.PrintJSON(os.Stdout, out)
 		}
 
 		var all []json.RawMessage
@@ -125,7 +127,7 @@ raw JSON through unchanged.`,
 			}
 			query.Set("offset", resp.NextPage.Offset)
 		}
-		return output.Print(os.Stdout, map[string]interface{}{"data": all})
+		return output.PrintJSON(os.Stdout, map[string]interface{}{"data": all})
 	},
 }
 

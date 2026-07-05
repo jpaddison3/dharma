@@ -25,33 +25,33 @@ var attachmentCmd = &cobra.Command{
 }
 
 var (
-	attachmentDownloadOutput    string
-	attachmentDownloadOutputDir string
+	attachmentDownloadOutputFile string
+	attachmentDownloadOutputDir  string
 )
 
 var attachmentDownloadCmd = &cobra.Command{
 	Use:   "download <gid>",
 	Short: "Download an attachment to disk",
-	Long: `Download an attachment to disk. Pass exactly one of --output (exact path) or
---output-dir (uses the attachment's name as the filename, sanitized).
+	Long: `Download an attachment to disk. Pass exactly one of --output-file (exact path)
+or --output-dir (uses the attachment's name as the filename, sanitized).
 
 On success, prints one JSON line to stdout: {"attachment_gid","path","bytes"}.
 On signed-URL expiry (HTTP 401/403 from the storage host) the metadata is
 re-fetched once and the download retried.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if (attachmentDownloadOutput == "") == (attachmentDownloadOutputDir == "") {
-			return fmt.Errorf("pass exactly one of --output or --output-dir")
+		if (attachmentDownloadOutputFile == "") == (attachmentDownloadOutputDir == "") {
+			return usageErrorf("pass exactly one of --output-file or --output-dir")
 		}
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		result, err := downloadAttachment(context.Background(), c, args[0], attachmentDownloadOutput, attachmentDownloadOutputDir)
+		result, err := downloadAttachment(context.Background(), c, args[0], attachmentDownloadOutputFile, attachmentDownloadOutputDir)
 		if err != nil {
 			return err
 		}
-		return output.Print(os.Stdout, result)
+		return output.PrintObject(os.Stdout, result)
 	},
 }
 
@@ -67,7 +67,7 @@ non-zero if any download failed.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskDownloadAttachmentsDir == "" {
-			return fmt.Errorf("--output-dir is required")
+			return usageErrorf("--output-dir is required")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -88,14 +88,13 @@ non-zero if any download failed.`,
 		if err := json.Unmarshal(resp.Data, &attachments); err != nil {
 			return fmt.Errorf("decode attachment list: %w", err)
 		}
-		if len(attachments) == 0 {
-			fmt.Fprintln(os.Stderr, "no attachments on task")
-			return nil
-		}
 		nameCounts := map[string]int{}
 		for _, a := range attachments {
 			nameCounts[sanitizeFilename(a.Name)]++
 		}
+		// Collect successes and emit a single list envelope, so an empty task
+		// yields {"ok":true,"count":0,"data":[]} rather than a stderr-only note.
+		results := []*downloadResult{}
 		var failed int
 		for _, a := range attachments {
 			outputPath := ""
@@ -108,14 +107,15 @@ non-zero if any download failed.`,
 				fmt.Fprintf(os.Stderr, "attachment %s (%s): %v\n", a.GID, a.Name, err)
 				continue
 			}
-			if err := output.Print(os.Stdout, result); err != nil {
-				return err
-			}
+			results = append(results, result)
 		}
 		if failed > 0 {
-			return fmt.Errorf("%d of %d attachments failed", failed, len(attachments))
+			// Partial/total failure: the error envelope (exit 1) is the whole
+			// stdout payload; per-file causes are on stderr. Successful files
+			// are on disk in --output-dir.
+			return fmt.Errorf("%d of %d attachments failed (%d downloaded — see stderr for causes)", failed, len(attachments), len(results))
 		}
-		return nil
+		return output.PrintList(os.Stdout, results, false, "")
 	},
 }
 
@@ -253,7 +253,7 @@ func sanitizeFilename(name string) string {
 }
 
 func init() {
-	attachmentDownloadCmd.Flags().StringVar(&attachmentDownloadOutput, "output", "", "exact output path (creates parent dirs)")
+	attachmentDownloadCmd.Flags().StringVar(&attachmentDownloadOutputFile, "output-file", "", "exact output path (creates parent dirs)")
 	attachmentDownloadCmd.Flags().StringVar(&attachmentDownloadOutputDir, "output-dir", "", "directory; filename comes from attachment name (sanitized)")
 	attachmentCmd.AddCommand(attachmentDownloadCmd)
 

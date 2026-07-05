@@ -48,7 +48,7 @@ dharma task search --text "MINERVA" --completed=false --fields name
 dharma task stories <gid> --fields type,text,created_at,created_by.name
 
 # attachments
-dharma attachment download <gid> --output ./screenshot.png
+dharma attachment download <gid> --output-file ./screenshot.png
 dharma attachment download <gid> --output-dir ./downloads        # uses attachment name
 dharma task download-attachments <task-gid> --output-dir ./out   # all attachments on a task
 
@@ -66,7 +66,40 @@ dharma api -X PUT /tasks/123 --body '{"data": {"completed": true}}'
 
 ### Output
 
-JSON to stdout: pretty when stdout is a TTY, compact when piped. Errors go to stderr with non-zero exit code.
+A JSON envelope to stdout: pretty when stdout is a TTY, compact when piped.
+
+- **Lists** — `{"ok": true, "count": N, "has_more": bool, "hint"?: "...", "data": [...]}`. `has_more: true` means the results were capped (`--paginate` or narrow filters; `hint` says how). Pull rows with `jq '.data[]'`.
+- **Single objects** (get, create, mutations) — `{"ok": true, "data": {...}}`.
+- **Failures** — a structured error to stdout plus a one-line summary to stderr:
+
+  ```json
+  {"ok": false, "error": {"message": "Not Authorized", "http_status": 401, "help": "..."}}
+  ```
+
+Long free text (`task get` notes, `task stories` text) over ~2,000 chars is truncated with an inline `… (truncated, N chars total — rerun with --full)` marker and named in a top-level `truncated_fields`; pass `--full` for the complete text.
+
+`dharma api` is the exception — on **success** it passes Asana's raw response through unchanged, no envelope, and always as JSON (it ignores `--output toon` so the escape hatch stays jq-parseable). On **failure** it still emits dharma's `{"ok": false, "error": {...}}` envelope and the exit codes below (the structured error and exit code are more useful to a caller than Asana's raw error body), so the raw-passthrough promise covers the success path only.
+
+Exit codes: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments).
+
+### Output format (experimental)
+
+`--output toon` emits [TOON](https://github.com/toon-format/toon) instead of JSON — a line-oriented format that drops repeated object keys. On real Asana payloads (byte proxy for tokens, via `scripts/measure-toon.sh`):
+
+| payload | savings |
+| --- | --- |
+| `my-tasks list` (flat) | ~38% |
+| `project list` (flat) | ~33% |
+| `task get` (nested object) | ~0% |
+| `task list --fields …,assignee.name` (nested rows) | ~0% |
+
+The win is real but only for **flat** list rows; nested rows fall back to inline JSON and single objects break even. It stays opt-in (default `json`): TOON isn't a `jq` target (`.data[]` won't work), and the mcpb shim parses JSON, so don't pipe TOON into either.
+
+`internal/output/toon.go` is a hand-rolled encoder covering the subset dharma emits (tabular flat arrays, inline-JSON fallback, custom quoting) — it is **TOON-ish, not guaranteed byte-compatible** with a spec-compliant parser. Treat the linked spec as the shape it aims at, not a round-trip contract.
+
+### Fields
+
+List and `get` commands send a curated `--fields` (opt_fields) set by default — small but useful, and it also strips Asana's `resource_type` noise. Override with `--fields a,b,c`, or `--fields ""` for Asana's raw representation. Note that Asana **silently ignores** unknown or misspelled opt_fields (a typo yields a bare `{"gid": ...}` with no error), so check spelling if a field you expect is missing.
 
 ### `-f` semantics for `dharma api`
 

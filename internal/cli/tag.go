@@ -15,6 +15,7 @@ var tagCmd = &cobra.Command{
 var (
 	tagListName     string
 	tagListPaginate bool
+	tagListFields   string
 )
 
 var tagListCmd = &cobra.Command{
@@ -32,9 +33,11 @@ var tagListCmd = &cobra.Command{
 		}
 		if tagListName != "" {
 			q := url.Values{"resource_type": []string{"tag"}, "query": []string{tagListName}}
+			setOptFields(q, tagListFields)
 			return runList(ctx, c, "/workspaces/"+ws+"/typeahead", q, false)
 		}
 		q := url.Values{"workspace": []string{ws}}
+		setOptFields(q, tagListFields)
 		return runList(ctx, c, "/tags", q, tagListPaginate)
 	},
 }
@@ -42,5 +45,6 @@ var tagListCmd = &cobra.Command{
 func init() {
 	tagListCmd.Flags().StringVar(&tagListName, "name", "", "fuzzy match against tag names (uses typeahead; max ~20 results)")
 	tagListCmd.Flags().BoolVar(&tagListPaginate, "paginate", false, "fetch all pages (ignored when --name is set)")
+	addFieldsFlag(tagListCmd, &tagListFields, "name,color")
 	tagCmd.AddCommand(tagListCmd)
 }

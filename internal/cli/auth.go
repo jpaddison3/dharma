@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -59,7 +60,8 @@ var authStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return runGet(context.Background(), c, "/users/me", nil)
+		q := url.Values{"opt_fields": []string{userMeDefaultFields}}
+		return runGet(context.Background(), c, "/users/me", q)
 	},
 }
 

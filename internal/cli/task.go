@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jpaddison3/dharma/internal/client"
 	"github.com/jpaddison3/dharma/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -18,6 +19,16 @@ var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Task commands",
 }
+
+// Curated default opt_fields. Passing them keeps payloads small AND strips
+// Asana's resource_type noise (present only when opt_fields is omitted). Pass
+// --fields "" to fall back to Asana's raw default representation.
+const (
+	defaultTaskListFields = "name,completed,due_on,assignee.name"
+	// custom_fields uses the compact name/display_value projection: full
+	// custom_fields would drag in enum metadata, gids, and type info per field.
+	defaultTaskGetFields = "name,notes,completed,due_on,assignee.name,projects.name,parent.name,num_subtasks,attachments.name,tags.name,custom_fields.name,custom_fields.display_value,permalink_url,created_at,modified_at"
+)
 
 var (
 	taskListAssignee   string
@@ -52,14 +63,12 @@ var taskListCmd = &cobra.Command{
 			q.Set("workspace", ws)
 			q.Set("assignee", taskListAssignee)
 		default:
-			return fmt.Errorf("provide --section, --project, or --assignee")
+			return usageErrorf("provide --section, --project, or --assignee")
 		}
 		if taskListLimit > 0 {
 			q.Set("limit", strconv.Itoa(taskListLimit))
 		}
-		if taskListFields != "" {
-			q.Set("opt_fields", taskListFields)
-		}
+		setOptFields(q, taskListFields)
 		if taskListIncomplete {
 			q.Set("completed_since", "now")
 		}
@@ -67,23 +76,188 @@ var taskListCmd = &cobra.Command{
 	},
 }
 
-var taskGetFields string
+var (
+	taskGetFields    string
+	taskGetNoContext bool
+	taskGetFull      bool
+)
 
 var taskGetCmd = &cobra.Command{
 	Use:   "get <gid>",
-	Short: "Fetch a task",
-	Args:  cobra.ExactArgs(1),
+	Short: "Fetch a task, with a context block summarizing comments/attachments/subtasks",
+	Long: `Fetch a task. By default the response carries a sibling "context" block that
+summarizes things an agent might not think to look for — the comment count
+(exactly one extra stories call, run in parallel; tasks with more than 100
+stories report "N+" rather than paying more calls for an exact count), plus
+attachment names, subtask count, and project names pulled free from the task
+itself. Use --no-context to skip the extra call, or --fields to change what
+the task object returns (the context reflects whatever fields come back).
+
+Long notes are truncated with an inline marker (and named in truncated_fields);
+pass --full to get the untruncated text.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
+		gid := args[0]
+		ctx := context.Background()
 		q := url.Values{}
-		if taskGetFields != "" {
-			q.Set("opt_fields", taskGetFields)
+		setOptFields(q, taskGetFields)
+
+		var task map[string]interface{}
+		var contextBlock interface{}
+
+		if taskGetNoContext {
+			if err := c.Get(ctx, "/tasks/"+gid, q, &task); err != nil {
+				return err
+			}
+		} else {
+			// Count comments in parallel with the main fetch. A buffered channel
+			// means the goroutine never leaks even if the main fetch errors first.
+			type storiesResult struct {
+				count int
+				more  bool
+				err   error
+			}
+			ch := make(chan storiesResult, 1)
+			go func() {
+				n, more, err := countComments(ctx, c, gid)
+				ch <- storiesResult{n, more, err}
+			}()
+
+			if err := c.Get(ctx, "/tasks/"+gid, q, &task); err != nil {
+				return err
+			}
+
+			sr := <-ch
+			var commentCount *int
+			if sr.err != nil {
+				// Degrade: the task itself is fine, so don't fail the command —
+				// note the miss on stderr and leave comments null.
+				fmt.Fprintf(os.Stderr, "warning: could not count comments: %v\n", sr.err)
+			} else {
+				commentCount = &sr.count
+			}
+			contextBlock = buildTaskContext(gid, task, commentCount, sr.more)
 		}
-		return runGet(context.Background(), c, "/tasks/"+args[0], q)
+
+		var truncatedFields []string
+		if !taskGetFull {
+			if notes, ok := task["notes"].(string); ok {
+				if shortened, was := truncateText(notes); was {
+					task["notes"] = shortened
+					truncatedFields = append(truncatedFields, "notes")
+				}
+			}
+		}
+		return output.PrintObjectFull(os.Stdout, task, contextBlock, truncatedFields)
 	},
+}
+
+// truncateLimit caps long free-text fields (notes, story text) at this many
+// runes before an inline marker is appended. Tunable; chosen to keep a task or
+// comment readable without dumping a whole document into context.
+const truncateLimit = 2000
+
+// truncateText shortens s to truncateLimit runes (UTF-8 safe, never splitting a
+// multibyte rune) with an inline marker naming the full length. Returns the
+// possibly-shortened string and whether it changed.
+func truncateText(s string) (string, bool) {
+	// Bytes >= runes, so a short byte length rules out truncation cheaply.
+	if len(s) <= truncateLimit {
+		return s, false
+	}
+	runes := []rune(s)
+	if len(runes) <= truncateLimit {
+		return s, false
+	}
+	return fmt.Sprintf("%s… (truncated, %d chars total — rerun with --full)", string(runes[:truncateLimit]), len(runes)), true
+}
+
+// countComments tallies comment_added stories on the first page (100 stories)
+// only, requesting just resource_subtype to keep the payload tiny. The count
+// exists to tell an agent whether to fetch comments, so precision past the
+// first page isn't worth the extra calls (paging fully costs up to 10 requests
+// per default `task get`). `more` reports whether further story pages exist —
+// the context block renders the count as "N+" in that case.
+func countComments(ctx context.Context, c *client.Client, gid string) (count int, more bool, err error) {
+	q := url.Values{}
+	q.Set("opt_fields", "resource_subtype")
+	q.Set("limit", "100")
+	resp, err := c.Do(ctx, "GET", "/tasks/"+gid+"/stories", q, nil)
+	if err != nil {
+		return 0, false, err
+	}
+	var stories []struct {
+		ResourceSubtype string `json:"resource_subtype"`
+	}
+	if err := json.Unmarshal(resp.Data, &stories); err != nil {
+		return 0, false, err
+	}
+	for _, s := range stories {
+		if s.ResourceSubtype == "comment_added" {
+			count++
+		}
+	}
+	more = resp.NextPage != nil && resp.NextPage.Offset != ""
+	return count, more, nil
+}
+
+// buildTaskContext assembles the context block from the fetched task plus the
+// (possibly nil) comment count. Fields absent from the task object — because
+// --fields narrowed them out — are omitted rather than reported as empty, so
+// the block never claims "no attachments" when it simply didn't ask.
+// moreComments means the count only covers the first 100 stories, so
+// "comments" becomes the string "N+" instead of an exact number.
+func buildTaskContext(gid string, task map[string]interface{}, commentCount *int, moreComments bool) map[string]interface{} {
+	block := map[string]interface{}{}
+	commentLabel := ""
+	if commentCount != nil {
+		commentLabel = strconv.Itoa(*commentCount)
+		if moreComments {
+			commentLabel += "+"
+			block["comments"] = commentLabel
+		} else {
+			block["comments"] = *commentCount
+		}
+	} else {
+		block["comments"] = nil // stories call failed
+	}
+	if v, present := task["attachments"]; present {
+		block["attachments"] = extractNames(v)
+	}
+	if v, present := task["num_subtasks"]; present {
+		if n, ok := v.(float64); ok {
+			block["subtasks"] = int(n)
+		}
+	}
+	if v, present := task["projects"]; present {
+		block["projects"] = extractNames(v)
+	}
+	if commentCount != nil && (*commentCount > 0 || moreComments) {
+		block["hint"] = fmt.Sprintf("dharma task stories %s — read the %s comment(s)", gid, commentLabel)
+	}
+	return block
+}
+
+// extractNames pulls the "name" of each object in a JSON array (decoded as
+// []interface{} of map[string]interface{}), returning a non-nil slice.
+func extractNames(v interface{}) []string {
+	names := []string{}
+	arr, ok := v.([]interface{})
+	if !ok {
+		return names
+	}
+	for _, item := range arr {
+		if m, ok := item.(map[string]interface{}); ok {
+			if name, ok := m["name"].(string); ok {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
 }
 
 var (
@@ -102,7 +276,7 @@ var taskCreateCmd = &cobra.Command{
 			return err
 		}
 		if taskCreateName == "" {
-			return fmt.Errorf("--name is required")
+			return usageErrorf("--name is required")
 		}
 		body := map[string]interface{}{"name": taskCreateName}
 		if len(taskCreateProjects) > 0 {
@@ -132,7 +306,7 @@ var taskCommentCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskCommentText == "" {
-			return fmt.Errorf("--text is required")
+			return usageErrorf("--text is required")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -150,7 +324,7 @@ var taskMoveCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskMoveSection == "" {
-			return fmt.Errorf("--section is required (a section gid)")
+			return usageErrorf("--section is required (a section gid)")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -171,7 +345,7 @@ var taskAddToProjectCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskAddToProjectProject == "" {
-			return fmt.Errorf("--project is required")
+			return usageErrorf("--project is required")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -193,7 +367,7 @@ var taskRemoveFromProjectCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskRemoveFromProjectProject == "" {
-			return fmt.Errorf("--project is required")
+			return usageErrorf("--project is required")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -211,7 +385,7 @@ var taskAddTagCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskAddTagTag == "" {
-			return fmt.Errorf("--tag is required (a tag gid)")
+			return usageErrorf("--tag is required (a tag gid)")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -229,7 +403,7 @@ var taskRenameCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskRenameName == "" {
-			return fmt.Errorf("--name is required")
+			return usageErrorf("--name is required")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -264,10 +438,10 @@ var taskSetDueCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskSetDueClear && taskSetDueDate != "" {
-			return fmt.Errorf("--clear and --due are mutually exclusive")
+			return usageErrorf("--clear and --due are mutually exclusive")
 		}
 		if !taskSetDueClear && taskSetDueDate == "" {
-			return fmt.Errorf("--due is required (YYYY-MM-DD, today, tomorrow, or ISO datetime), or use --clear")
+			return usageErrorf("--due is required (YYYY-MM-DD, today, tomorrow, or ISO datetime), or use --clear")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -306,10 +480,10 @@ var taskAssignCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskAssignClear && taskAssignTo != "" {
-			return fmt.Errorf("--clear and --to are mutually exclusive")
+			return usageErrorf("--clear and --to are mutually exclusive")
 		}
 		if !taskAssignClear && taskAssignTo == "" {
-			return fmt.Errorf("--to is required (user gid or 'me'), or use --clear")
+			return usageErrorf("--to is required (user gid or 'me'), or use --clear")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -334,7 +508,7 @@ var taskSetNotesCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !cmd.Flags().Changed("notes") {
-			return fmt.Errorf("--notes is required (pass \"\" to clear)")
+			return usageErrorf("--notes is required (pass \"\" to clear)")
 		}
 		c, err := newClient()
 		if err != nil {
@@ -406,9 +580,7 @@ may have been truncated.`,
 		if taskSearchModifiedSince != "" {
 			q.Set("modified_at.after", taskSearchModifiedSince)
 		}
-		if taskSearchFields != "" {
-			q.Set("opt_fields", taskSearchFields)
-		}
+		setOptFields(q, taskSearchFields)
 		resp, err := c.Do(context.Background(), "GET", "/workspaces/"+ws+"/tasks/search", q, nil)
 		if err != nil {
 			return err
@@ -417,32 +589,61 @@ may have been truncated.`,
 		if err := json.Unmarshal(resp.Data, &results); err != nil {
 			return fmt.Errorf("search response was not an array: %w", err)
 		}
-		if len(results) >= limit {
-			fmt.Fprintf(os.Stderr, "warning: %d results returned (== --limit); the search endpoint has no pagination — narrow filters or use --modified-since to chunk by modification time.\n", len(results))
+		hasMore := len(results) >= limit
+		hint := ""
+		if hasMore {
+			// The search endpoint has no offset pagination, so a full page
+			// likely means truncation. Point at the one workaround.
+			hint = fmt.Sprintf("hit the %d-result cap and search has no pagination — narrow filters, or take the oldest result's modified_at and rerun with --modified-since <that timestamp> to page by modification time", limit)
 		}
-		return output.Print(os.Stdout, results)
+		return output.PrintList(os.Stdout, results, hasMore, hint)
 	},
 }
 
 var (
 	taskStoriesFields   string
 	taskStoriesPaginate bool
+	taskStoriesFull     bool
 )
 
 var taskStoriesCmd = &cobra.Command{
 	Use:   "stories <gid>",
 	Short: "List stories (comments and change log) on a task",
-	Args:  cobra.ExactArgs(1),
+	Long: `List stories (comments and change log) on a task. Long comment text is
+truncated with an inline marker (and "text" listed in truncated_fields); pass
+--full for untruncated text.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
 		q := url.Values{}
-		if taskStoriesFields != "" {
-			q.Set("opt_fields", taskStoriesFields)
+		setOptFields(q, taskStoriesFields)
+		all, hasMore, err := fetchList(context.Background(), c, "/tasks/"+args[0]+"/stories", q, taskStoriesPaginate)
+		if err != nil {
+			return err
 		}
-		return runList(context.Background(), c, "/tasks/"+args[0]+"/stories", q, taskStoriesPaginate)
+		var truncatedFields []string
+		if !taskStoriesFull {
+			truncatedAny := false
+			for _, item := range all {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if text, ok := m["text"].(string); ok {
+					if shortened, was := truncateText(text); was {
+						m["text"] = shortened
+						truncatedAny = true
+					}
+				}
+			}
+			if truncatedAny {
+				truncatedFields = []string{"text"}
+			}
+		}
+		return output.PrintListFull(os.Stdout, all, hasMore, paginateHintFor(hasMore), truncatedFields)
 	},
 }
 
@@ -451,11 +652,13 @@ func init() {
 	taskListCmd.Flags().StringVar(&taskListProject, "project", "", "project gid")
 	taskListCmd.Flags().StringVar(&taskListSection, "section", "", "section gid")
 	taskListCmd.Flags().IntVar(&taskListLimit, "limit", 0, "max items per page (server default if 0)")
-	taskListCmd.Flags().StringVar(&taskListFields, "fields", "", "opt_fields, e.g. name,assignee.name")
+	addFieldsFlag(taskListCmd, &taskListFields, defaultTaskListFields)
 	taskListCmd.Flags().BoolVar(&taskListPaginate, "paginate", false, "fetch all pages")
 	taskListCmd.Flags().BoolVar(&taskListIncomplete, "incomplete", false, "only tasks not yet completed (completed_since=now)")
 
-	taskGetCmd.Flags().StringVar(&taskGetFields, "fields", "", "opt_fields, e.g. name,assignee.name")
+	addFieldsFlag(taskGetCmd, &taskGetFields, defaultTaskGetFields)
+	taskGetCmd.Flags().BoolVar(&taskGetNoContext, "no-context", false, "skip the context block (avoids the extra comment-count call)")
+	taskGetCmd.Flags().BoolVar(&taskGetFull, "full", false, "return full notes without truncation")
 
 	taskCreateCmd.Flags().StringVar(&taskCreateName, "name", "", "task name (required)")
 	taskCreateCmd.Flags().StringArrayVar(&taskCreateProjects, "project", nil, "project gid (repeatable)")
@@ -490,11 +693,12 @@ func init() {
 	taskSearchCmd.Flags().StringVar(&taskSearchSection, "section", "", "section gid")
 	taskSearchCmd.Flags().StringVar(&taskSearchTag, "tag", "", "tag gid")
 	taskSearchCmd.Flags().StringVar(&taskSearchModifiedSince, "modified-since", "", "ISO 8601 datetime; maps to modified_at.after")
-	taskSearchCmd.Flags().StringVar(&taskSearchFields, "fields", "", "opt_fields, e.g. name,assignee.name,modified_at")
+	addFieldsFlag(taskSearchCmd, &taskSearchFields, defaultTaskListFields)
 	taskSearchCmd.Flags().IntVar(&taskSearchLimit, "limit", 0, "max results (1-100, default 100)")
 
-	taskStoriesCmd.Flags().StringVar(&taskStoriesFields, "fields", "type,text,created_at,created_by.name", "opt_fields")
+	addFieldsFlag(taskStoriesCmd, &taskStoriesFields, "type,text,created_at,created_by.name")
 	taskStoriesCmd.Flags().BoolVar(&taskStoriesPaginate, "paginate", false, "fetch all pages")
+	taskStoriesCmd.Flags().BoolVar(&taskStoriesFull, "full", false, "return full comment text without truncation")
 
 	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd, taskSetDueCmd, taskAssignCmd, taskSetNotesCmd, taskSearchCmd, taskStoriesCmd)
 }

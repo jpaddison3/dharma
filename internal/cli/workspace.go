@@ -2,11 +2,15 @@ package cli
 
 import (
 	"context"
+	"net/url"
 
 	"github.com/spf13/cobra"
 )
 
-var workspaceListPaginate bool
+var (
+	workspaceListPaginate bool
+	workspaceListFields   string
+)
 
 var workspaceCmd = &cobra.Command{
 	Use:   "workspace",
@@ -21,11 +25,14 @@ var workspaceListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return runList(context.Background(), c, "/workspaces", nil, workspaceListPaginate)
+		q := url.Values{}
+		setOptFields(q, workspaceListFields)
+		return runList(context.Background(), c, "/workspaces", q, workspaceListPaginate)
 	},
 }
 
 func init() {
 	workspaceListCmd.Flags().BoolVar(&workspaceListPaginate, "paginate", false, "fetch all pages")
+	addFieldsFlag(workspaceListCmd, &workspaceListFields, "name")
 	workspaceCmd.AddCommand(workspaceListCmd)
 }

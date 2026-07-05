@@ -7,10 +7,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// userMeDefaultFields trims Asana's /users/me response to the useful bits —
+// most notably dropping the five profile-photo URLs. Shared with `auth status`.
+const userMeDefaultFields = "name,email,workspaces.name"
+
 var userCmd = &cobra.Command{
 	Use:   "user",
 	Short: "User commands",
 }
+
+var userMeFields string
 
 var userMeCmd = &cobra.Command{
 	Use:   "me",
@@ -20,7 +26,9 @@ var userMeCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return runGet(context.Background(), c, "/users/me", nil)
+		q := url.Values{}
+		setOptFields(q, userMeFields)
+		return runGet(context.Background(), c, "/users/me", q)
 	},
 }
 
@@ -45,15 +53,11 @@ var userListCmd = &cobra.Command{
 		}
 		if userListName != "" {
 			q := url.Values{"resource_type": []string{"user"}, "query": []string{userListName}}
-			if userListFields != "" {
-				q.Set("opt_fields", userListFields)
-			}
+			setOptFields(q, userListFields)
 			return runList(ctx, c, "/workspaces/"+ws+"/typeahead", q, false)
 		}
 		q := url.Values{"workspace": []string{ws}}
-		if userListFields != "" {
-			q.Set("opt_fields", userListFields)
-		}
+		setOptFields(q, userListFields)
 		return runList(ctx, c, "/users", q, userListPaginate)
 	},
 }
@@ -70,19 +74,19 @@ var userGetCmd = &cobra.Command{
 			return err
 		}
 		q := url.Values{}
-		if userGetFields != "" {
-			q.Set("opt_fields", userGetFields)
-		}
+		setOptFields(q, userGetFields)
 		return runGet(context.Background(), c, "/users/"+args[0], q)
 	},
 }
 
 func init() {
+	addFieldsFlag(userMeCmd, &userMeFields, userMeDefaultFields)
+
 	userListCmd.Flags().StringVar(&userListName, "name", "", "fuzzy match against user names (uses typeahead; max ~20 results)")
-	userListCmd.Flags().StringVar(&userListFields, "fields", "name,email", "opt_fields, e.g. name,email")
+	addFieldsFlag(userListCmd, &userListFields, "name,email")
 	userListCmd.Flags().BoolVar(&userListPaginate, "paginate", false, "fetch all pages (ignored when --name is set)")
 
-	userGetCmd.Flags().StringVar(&userGetFields, "fields", "name,email", "opt_fields, e.g. name,email")
+	addFieldsFlag(userGetCmd, &userGetFields, "name,email")
 
 	userCmd.AddCommand(userMeCmd, userListCmd, userGetCmd)
 }

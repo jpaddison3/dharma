@@ -45,7 +45,15 @@ For endpoints without a typed command, `dharma api` works like `gh api` (`"$DHAR
 
 ## Conventions
 
-- Output is JSON on stdout (compact when piped); errors go to stderr with a non-zero exit code.
+- **Output** is a JSON envelope on stdout (compact when piped):
+  - **Lists** → `{"ok": true, "count": N, "has_more": bool, "hint"?, "data": [...]}`. `has_more: true` means the results were capped — `--paginate` or narrow filters (the `hint` field says how). Pull rows with `jq '.data[]'`.
+  - **Single objects** (get, create, mutations) → `{"ok": true, "data": {...}}`. `task get` also returns a `context` block (comment count, attachment names, subtask count, project names, and a `hint` when there are comments) — read it to decide what to fetch next; `--no-context` skips the extra comment-count call. On very busy tasks (>100 stories) the comment count is the string `"N+"` rather than an exact number.
+  - **Failures** → `{"ok": false, "error": {"message", "http_status"?, "help"?}}` on stdout, plus a one-line `Error: …` on stderr.
+  - **Truncation**: long free text (`task get` notes, `task stories` text) over ~2,000 chars is shortened with an inline `… (truncated, N chars total — rerun with --full)` marker, and the field name is listed in a top-level `truncated_fields`. Pass `--full` for the complete text.
+  - `dharma api` is the exception: on success it passes Asana's raw response through unchanged (no envelope, always JSON — it ignores `--output toon`). On failure it still returns the `{ok:false,error:{...}}` envelope and the exit codes below — only the success path is raw.
+  - `--output toon` is an experimental compact format (~35% smaller on flat lists like my-tasks/project list; ~0% on nested data). Default is `json`; keep `json` when piping to `jq`, since `.data[]` doesn't work on TOON.
+- **Exit codes**: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments). Branch on the exit code rather than scraping text.
+- **Not idempotent**: `task create` and `task comment` POST new objects and Asana has no dedupe key — if a call times out, verify with `task search` / `task stories` before retrying, or you may create a duplicate.
 - Asana gids are opaque strings — never invent one; get them from list/search output.
-- Use `--fields` to keep payloads small; default field sets are minimal.
+- **Fields**: list/get commands send a curated `--fields` set by default (small but useful). Override with `--fields a,b,c`, or `--fields ""` for Asana's raw representation. Caveat: **Asana silently ignores unknown/misspelled opt_fields** — a typo yields a bare `{"gid": ...}` with no error, so if an expected field is missing, check the spelling.
 - The default workspace comes from the bundled config; override with `--workspace <gid>` if needed.
