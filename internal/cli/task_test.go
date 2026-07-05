@@ -67,7 +67,7 @@ func TestBuildTaskContextFull(t *testing.T) {
 		"num_subtasks": float64(3),
 		"projects":     []interface{}{map[string]interface{}{"name": "Website"}},
 	}
-	block := buildTaskContext("123", task, &n)
+	block := buildTaskContext("123", task, &n, false)
 
 	if block["comments"] != 2 {
 		t.Errorf("comments = %v", block["comments"])
@@ -89,7 +89,7 @@ func TestBuildTaskContextFull(t *testing.T) {
 
 func TestBuildTaskContextNoComments(t *testing.T) {
 	zero := 0
-	block := buildTaskContext("123", map[string]interface{}{}, &zero)
+	block := buildTaskContext("123", map[string]interface{}{}, &zero, false)
 	if block["comments"] != 0 {
 		t.Errorf("comments = %v", block["comments"])
 	}
@@ -98,10 +98,35 @@ func TestBuildTaskContextNoComments(t *testing.T) {
 	}
 }
 
+func TestBuildTaskContextMoreComments(t *testing.T) {
+	// More story pages exist: count covers only the first page, so the block
+	// reports "N+" (a string) and the hint carries the same label.
+	n := 37
+	block := buildTaskContext("123", map[string]interface{}{}, &n, true)
+	if block["comments"] != "37+" {
+		t.Errorf(`comments = %v, want "37+"`, block["comments"])
+	}
+	hint, ok := block["hint"].(string)
+	if !ok || !strings.Contains(hint, "37+ comment(s)") {
+		t.Errorf("hint = %v", block["hint"])
+	}
+
+	// Zero comments on the first page but more stories exist: comments beyond
+	// page one are possible, so still "0+" with a hint.
+	zero := 0
+	block = buildTaskContext("123", map[string]interface{}{}, &zero, true)
+	if block["comments"] != "0+" {
+		t.Errorf(`comments = %v, want "0+"`, block["comments"])
+	}
+	if _, ok := block["hint"]; !ok {
+		t.Error("hint should be present when more stories may hold comments")
+	}
+}
+
 func TestBuildTaskContextNarrowedFieldsOmitted(t *testing.T) {
 	n := 1
 	// Task fetched with narrowed --fields: no attachments/num_subtasks/projects.
-	block := buildTaskContext("123", map[string]interface{}{}, &n)
+	block := buildTaskContext("123", map[string]interface{}{}, &n, false)
 	for _, k := range []string{"attachments", "subtasks", "projects"} {
 		if _, ok := block[k]; ok {
 			t.Errorf("%q should be omitted when not fetched, got %v", k, block[k])
@@ -110,7 +135,7 @@ func TestBuildTaskContextNarrowedFieldsOmitted(t *testing.T) {
 }
 
 func TestBuildTaskContextDegraded(t *testing.T) {
-	block := buildTaskContext("123", map[string]interface{}{}, nil)
+	block := buildTaskContext("123", map[string]interface{}{}, nil, false)
 	v, ok := block["comments"]
 	if !ok || v != nil {
 		t.Errorf("comments should be present and null when the count failed, got %v (present=%v)", v, ok)

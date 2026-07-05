@@ -25,7 +25,9 @@ var taskCmd = &cobra.Command{
 // --fields "" to fall back to Asana's raw default representation.
 const (
 	defaultTaskListFields = "name,completed,due_on,assignee.name"
-	defaultTaskGetFields  = "name,notes,completed,due_on,assignee.name,projects.name,parent.name,num_subtasks,attachments.name,tags.name,permalink_url,created_at,modified_at"
+	// custom_fields uses the compact name/display_value projection: full
+	// custom_fields would drag in enum metadata, gids, and type info per field.
+	defaultTaskGetFields = "name,notes,completed,due_on,assignee.name,projects.name,parent.name,num_subtasks,attachments.name,tags.name,custom_fields.name,custom_fields.display_value,permalink_url,created_at,modified_at"
 )
 
 var (
@@ -85,10 +87,11 @@ var taskGetCmd = &cobra.Command{
 	Short: "Fetch a task, with a context block summarizing comments/attachments/subtasks",
 	Long: `Fetch a task. By default the response carries a sibling "context" block that
 summarizes things an agent might not think to look for — the comment count
-(one extra stories call, run in parallel), plus attachment names, subtask
-count, and project names pulled free from the task itself. Use --no-context to
-skip the extra call, or --fields to change what the task object returns (the
-context reflects whatever fields come back).
+(exactly one extra stories call, run in parallel; tasks with more than 100
+stories report "N+" rather than paying more calls for an exact count), plus
+attachment names, subtask count, and project names pulled free from the task
+itself. Use --no-context to skip the extra call, or --fields to change what
+the task object returns (the context reflects whatever fields come back).
 
 Long notes are truncated with an inline marker (and named in truncated_fields);
 pass --full to get the untruncated text.`,
@@ -115,12 +118,13 @@ pass --full to get the untruncated text.`,
 			// means the goroutine never leaks even if the main fetch errors first.
 			type storiesResult struct {
 				count int
+				more  bool
 				err   error
 			}
 			ch := make(chan storiesResult, 1)
 			go func() {
-				n, err := countComments(ctx, c, gid)
-				ch <- storiesResult{n, err}
+				n, more, err := countComments(ctx, c, gid)
+				ch <- storiesResult{n, more, err}
 			}()
 
 			if err := c.Get(ctx, "/tasks/"+gid, q, &task); err != nil {
@@ -136,7 +140,7 @@ pass --full to get the untruncated text.`,
 			} else {
 				commentCount = &sr.count
 			}
-			contextBlock = buildTaskContext(gid, task, commentCount)
+			contextBlock = buildTaskContext(gid, task, commentCount, sr.more)
 		}
 
 		var truncatedFields []string
@@ -172,47 +176,52 @@ func truncateText(s string) (string, bool) {
 	return fmt.Sprintf("%s… (truncated, %d chars total — rerun with --full)", string(runes[:truncateLimit]), len(runes)), true
 }
 
-// countComments tallies comment_added stories on a task, requesting only
-// resource_subtype to keep each page tiny. Pages fully (capped well above any
-// realistic task) so recent comments on later pages aren't missed.
-func countComments(ctx context.Context, c *client.Client, gid string) (int, error) {
+// countComments tallies comment_added stories on the first page (100 stories)
+// only, requesting just resource_subtype to keep the payload tiny. The count
+// exists to tell an agent whether to fetch comments, so precision past the
+// first page isn't worth the extra calls (paging fully costs up to 10 requests
+// per default `task get`). `more` reports whether further story pages exist —
+// the context block renders the count as "N+" in that case.
+func countComments(ctx context.Context, c *client.Client, gid string) (count int, more bool, err error) {
 	q := url.Values{}
 	q.Set("opt_fields", "resource_subtype")
 	q.Set("limit", "100")
-	const maxPages = 10
-	count := 0
-	for page := 0; page < maxPages; page++ {
-		resp, err := c.Do(ctx, "GET", "/tasks/"+gid+"/stories", q, nil)
-		if err != nil {
-			return 0, err
-		}
-		var stories []struct {
-			ResourceSubtype string `json:"resource_subtype"`
-		}
-		if err := json.Unmarshal(resp.Data, &stories); err != nil {
-			return 0, err
-		}
-		for _, s := range stories {
-			if s.ResourceSubtype == "comment_added" {
-				count++
-			}
-		}
-		if resp.NextPage == nil || resp.NextPage.Offset == "" {
-			break
-		}
-		q.Set("offset", resp.NextPage.Offset)
+	resp, err := c.Do(ctx, "GET", "/tasks/"+gid+"/stories", q, nil)
+	if err != nil {
+		return 0, false, err
 	}
-	return count, nil
+	var stories []struct {
+		ResourceSubtype string `json:"resource_subtype"`
+	}
+	if err := json.Unmarshal(resp.Data, &stories); err != nil {
+		return 0, false, err
+	}
+	for _, s := range stories {
+		if s.ResourceSubtype == "comment_added" {
+			count++
+		}
+	}
+	more = resp.NextPage != nil && resp.NextPage.Offset != ""
+	return count, more, nil
 }
 
 // buildTaskContext assembles the context block from the fetched task plus the
 // (possibly nil) comment count. Fields absent from the task object — because
 // --fields narrowed them out — are omitted rather than reported as empty, so
 // the block never claims "no attachments" when it simply didn't ask.
-func buildTaskContext(gid string, task map[string]interface{}, commentCount *int) map[string]interface{} {
+// moreComments means the count only covers the first 100 stories, so
+// "comments" becomes the string "N+" instead of an exact number.
+func buildTaskContext(gid string, task map[string]interface{}, commentCount *int, moreComments bool) map[string]interface{} {
 	block := map[string]interface{}{}
+	commentLabel := ""
 	if commentCount != nil {
-		block["comments"] = *commentCount
+		commentLabel = strconv.Itoa(*commentCount)
+		if moreComments {
+			commentLabel += "+"
+			block["comments"] = commentLabel
+		} else {
+			block["comments"] = *commentCount
+		}
 	} else {
 		block["comments"] = nil // stories call failed
 	}
@@ -227,8 +236,8 @@ func buildTaskContext(gid string, task map[string]interface{}, commentCount *int
 	if v, present := task["projects"]; present {
 		block["projects"] = extractNames(v)
 	}
-	if commentCount != nil && *commentCount > 0 {
-		block["hint"] = fmt.Sprintf("dharma task stories %s — read the %d comment(s)", gid, *commentCount)
+	if commentCount != nil && (*commentCount > 0 || moreComments) {
+		block["hint"] = fmt.Sprintf("dharma task stories %s — read the %s comment(s)", gid, commentLabel)
 	}
 	return block
 }
