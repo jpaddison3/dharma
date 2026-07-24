@@ -602,15 +602,17 @@ func withCap(t *testing.T, n int) {
 // (small enough to fit the pipe buffer, so it never blocks), then closes
 // stdout and keeps running. That is the shape SIGPIPE cannot stop: with no
 // further writes the child never notices the closed pipe, so only the caller
-// killing it ends the tool call. Its sleep is far longer than the test's hang
-// guard so the guard can't be beaten by the child exiting on its own.
+// killing it ends the tool call. The sleep is exec'd (so the kill lands on it
+// rather than on a shell that already forked it, leaving nothing behind) and is
+// far longer than the test's hang guard, so the guard can't be beaten by the
+// child exiting on its own.
 func writeFloodStub(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "dharma-flood")
 	script := `#!/bin/sh
 printf '%8192d' 0
 exec 1>&-
-sleep 300
+exec sleep 300
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)

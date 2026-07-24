@@ -45,8 +45,16 @@ check_tag() { # <sha or empty> <where>
     exit 1
   fi
 }
-check_tag "$(git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/v$VERSION^{commit}" || true)" "this clone"
-check_tag "$(git -C "$REPO_ROOT" ls-remote --tags origin "refs/tags/v$VERSION^{}" | cut -f1)" "origin"
+LOCAL_TAG="$(git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/v$VERSION^{commit}" || true)"
+check_tag "$LOCAL_TAG" "this clone"
+# Both refspecs: ls-remote emits the peeled ^{} line only for annotated tags, so
+# asking for it alone would see nothing for a lightweight tag — which is the kind
+# git and gh create by default, i.e. exactly the stale tag this guards against.
+# tail -n1 takes the peeled line when both are present. The lookup is assigned
+# first so that an unreachable origin aborts the release under set -e instead of
+# reading as "no remote tag".
+REMOTE_TAG_REFS="$(git -C "$REPO_ROOT" ls-remote --tags origin "refs/tags/v$VERSION" "refs/tags/v$VERSION^{}")"
+check_tag "$(printf '%s\n' "$REMOTE_TAG_REFS" | grep . | tail -n1 | cut -f1)" "origin"
 gh auth status
 
 # The suite is the only gate on the artifact colleagues install, so run it here

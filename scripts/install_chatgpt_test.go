@@ -138,6 +138,24 @@ ASANA_WORKSPACE = "111"
 			config:   "[[mcp_servers.dharma]]\ncommand = \"/old/dharma\"\n",
 			wantCode: foundExisting,
 		},
+		// An inline table is closed by definition, so appending any
+		// [mcp_servers.*] header after one is invalid TOML — even when dharma
+		// isn't in the file at all.
+		{
+			name:     "bails on an inline mcp_servers table containing dharma",
+			config:   "mcp_servers = { dharma = { command = \"/old/dharma\", args = [\"mcp\"] } }\n",
+			wantCode: foundExisting,
+		},
+		{
+			name:     "bails on an inline mcp_servers table without dharma",
+			config:   "mcp_servers = { other = { command = \"/x\" } }\n",
+			wantCode: foundExisting,
+		},
+		{
+			name:     "bails on an empty inline mcp_servers table",
+			config:   "mcp_servers = {}\n",
+			wantCode: foundExisting,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()

@@ -130,21 +130,22 @@ register_via_toml() (
       for (i = 1; i <= n; i++) print lines[i]
     }
   ' "$config" > "$stripped" || { rm -f "$stripped"; exit 1; }
-  # A surviving `dharma` definition means the strip missed a spelling, and
-  # appending now would declare the table twice — which makes every Codex app
-  # reject the whole file. The pattern covers the three shapes the awk above
-  # doesn't strip: a header with internal whitespace, quotes, or double
-  # brackets; a top-level dotted key (`mcp_servers.dharma.command = ...`,
-  # which needs no [mcp_servers] header at all); and a dotted or quoted key
-  # under [mcp_servers] (`dharma.command =`, `dharma = {...}`). Matching too
-  # much only costs a bail-out; matching too little corrupts the file.
+  # Bail if appending `[mcp_servers.dharma]` could produce invalid TOML. Four
+  # shapes the awk above doesn't strip: a header with internal whitespace,
+  # quotes, or double brackets; a top-level dotted key
+  # (`mcp_servers.dharma.command = ...`, which needs no [mcp_servers] header at
+  # all); a dotted or quoted key under [mcp_servers] (`dharma.command =`,
+  # `dharma = {...}`); and `mcp_servers = { ... }`, an inline table that is
+  # closed by definition, so appending ANY [mcp_servers.*] header after it is
+  # illegal — even when dharma appears nowhere in the file. Matching too much
+  # only costs a bail-out; matching too little corrupts the file.
   #
   # A [mcp_servers.dharma.env] sub-table is deliberately not matched: it
   # survives and re-attaches to the fresh block, which is where a hand-set
   # ASANA_WORKSPACE lives. Note that a stale env.ASANA_TOKEN there outranks the
   # config file's token, so re-running this installer cannot fix "still the old
   # account" — that sub-table has to be removed by hand.
-  if grep -Eq "^[[:space:]]*(\[+[[:space:]]*[\"']?mcp_servers[\"']?[[:space:]]*\.[[:space:]]*[\"']?dharma[\"']?[[:space:]]*\]|[\"']?mcp_servers[\"']?[[:space:]]*\.[[:space:]]*[\"']?dharma[\"']?[[:space:]]*[.=]|[\"']?dharma[\"']?[[:space:]]*[.=])" "$stripped"; then
+  if grep -Eq "^[[:space:]]*(\[+[[:space:]]*[\"']?mcp_servers[\"']?[[:space:]]*\.[[:space:]]*[\"']?dharma[\"']?[[:space:]]*\]|[\"']?mcp_servers[\"']?[[:space:]]*\.[[:space:]]*[\"']?dharma[\"']?[[:space:]]*[.=]|[\"']?mcp_servers[\"']?[[:space:]]*=|[\"']?dharma[\"']?[[:space:]]*[.=])" "$stripped"; then
     rm -f "$stripped"
     exit 2
   fi
@@ -194,25 +195,45 @@ codex_config="$HOME/.codex/config.toml"
 # colleague get manual steps.
 register_via_codex() {
   command -v codex >/dev/null 2>&1 || return 1
-  # Match on the whole transport, not just the path: an entry pointing at this
-  # binary with different args (or a disabled one) is not a working
-  # registration, and skipping the add would report success for something that
-  # never starts. tr squeezes the pretty-printed JSON onto one line so the
-  # command, its args, and enabled can be matched together.
   local entry
-  entry="$(codex mcp get dharma --json 2>/dev/null | tr -d ' \n' || true)"
-  case "$entry" in
-    *"\"enabled\":true"*"\"command\":\"$BIN\",\"args\":[\"mcp\"]"*)
-      echo "dharma is already registered and enabled with codex mcp at $BIN — leaving its settings alone."
-      return 0
-      ;;
-  esac
+  entry="$(codex mcp get dharma --json 2>/dev/null || true)"
+  if [ -n "$entry" ] && codex_entry_matches "$entry"; then
+    echo "dharma is already registered with codex mcp at $BIN — leaving its settings alone."
+    return 0
+  fi
   if [ -n "$entry" ]; then
-    echo "note: replacing an existing codex mcp entry for dharma — any custom env," >&2
-    echo "      timeout, or approval settings on it are reset." >&2
+    echo "note: replacing the existing codex mcp entry for dharma (it points somewhere" >&2
+    echo "      else, has different args, or is disabled) — any custom env, timeout, or" >&2
+    echo "      approval settings on it are reset." >&2
   fi
   codex mcp add dharma -- "$BIN" mcp || return 1
   echo "registered dharma with codex mcp."
+}
+
+# codex_entry_matches reports whether an existing `codex mcp get --json` entry
+# is already what this installer would write, in which case re-adding it would
+# only throw away the colleague's own settings (a hand-set
+# [mcp_servers.dharma.env] ASANA_WORKSPACE, a timeout, an approval choice).
+#
+# Fields are read one at a time rather than matched against a whole serialized
+# shape: key order, key adjacency, and indentation are codex's business and
+# have no business breaking an upgrade. `enabled` missing counts as enabled —
+# codex only started emitting it in 0.46 — while an explicit false does not, so
+# a disabled entry gets replaced rather than silently left dead. Anything this
+# can't read (compact JSON from some future codex, a shape change) falls
+# through to a replace, which is loud rather than silently wrong.
+codex_entry_matches() {
+  local entry="$1" command args
+  case "$entry" in *'"enabled"'*false*) return 1 ;; esac
+  command="$(printf '%s\n' "$entry" | sed -n 's/^[[:space:]]*"command":[[:space:]]*"\(.*\)",*$/\1/p')"
+  # Each args element sits on its own line between "args": [ and ]; collapsing
+  # them to one space-separated string keeps values intact (no whitespace
+  # stripping inside them) while making the comparison a single test.
+  args="$(printf '%s\n' "$entry" \
+    | sed -n '/"args":[[:space:]]*\[/,/\]/p' \
+    | sed -n 's/^[[:space:]]*"\(.*\)",*$/\1/p' \
+    | tr '\n' ' ')"
+  [ "$command" = "$BIN" ] && [ "$args" = "mcp " ]
 }
 
 if ! register_via_codex; then
