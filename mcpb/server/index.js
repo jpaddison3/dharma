@@ -73,9 +73,14 @@ function runDharma(args) {
     // Once resolved, the workspace gid is offered to every call; commands
     // that don't take a workspace ignore the env var.
     if (workspaceGid) env.ASANA_WORKSPACE = workspaceGid;
-    execFile(dharmaBin, args, { env, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+    const child = execFile(dharmaBin, args, { env, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({ ok: !err, stdout: stdout ?? "", stderr: stderr ?? "", error: err?.message ?? "" });
     });
+    // execFile leaves the child's stdin an open pipe. No tool here feeds stdin,
+    // so close it: any command that would read stdin — a "-"/"@-" sentinel, or
+    // `task comment` with no --text — then gets an immediate EOF instead of
+    // blocking this Promise (and the Desktop tool call) forever.
+    child.stdin?.end();
   });
 }
 
@@ -346,6 +351,33 @@ cliTool(
   }
 );
 
+// On POST/PUT/PATCH the CLI expands a leading "@" in a -f value or --body into
+// a local-file read ("@path") or stdin read ("@-"/"-"). Model-supplied strings
+// must never reach that: it would turn "call the Asana API" into "read an
+// arbitrary local file (e.g. the token in config.json, an SSH key) and post it
+// to Asana", reachable by prompt injection from any task text the model reads.
+// Reject those forms at the boundary. GET/DELETE query values are literal in
+// the CLI, so only body methods need guarding.
+function rejectFileSentinels(method, field, body) {
+  const isBodyMethod = method === "POST" || method === "PUT" || method === "PATCH";
+  if (!isBodyMethod) return;
+  for (const f of field ?? []) {
+    const eq = f.indexOf("=");
+    const value = eq === -1 ? "" : f.slice(eq + 1);
+    if (value.startsWith("@")) {
+      throw new Error(
+        `field ${JSON.stringify(f)} has a value starting with '@', which dharma would read as a local file. ` +
+          `That's not allowed here. Use the comment_task/create_task tools for text, or send a value that doesn't start with '@'.`
+      );
+    }
+  }
+  if (body !== undefined && (body === "-" || body.startsWith("@"))) {
+    throw new Error(
+      `body ${JSON.stringify(body)} would be read from a local file or stdin, which isn't allowed here. Pass the JSON body inline.`
+    );
+  }
+}
+
 cliTool(
   "asana_api",
   "Raw Asana API passthrough for anything the other tools don't cover (modeled on `gh api`). " +
@@ -354,12 +386,13 @@ cliTool(
   {
     method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).default("GET").describe("HTTP method"),
     path: z.string().describe("API path, e.g. /users/me or /tasks/123"),
-    field: z.array(z.string()).optional().describe("key=value pairs (query params on GET/DELETE, body fields otherwise)"),
-    body: z.string().optional().describe("Raw JSON body, passed through unchanged"),
+    field: z.array(z.string()).optional().describe("key=value pairs (query params on GET/DELETE, JSON body fields otherwise). Values are literal text; on write methods a value may not start with '@'."),
+    body: z.string().optional().describe("Raw JSON body for POST/PUT/PATCH, sent unchanged. Must be inline JSON — a leading '@' or a lone '-' is rejected."),
     paginate: z.boolean().optional().describe("Follow all pages (GET only)"),
   },
   { needsWorkspace: false },
   ({ method, path: apiPath, field, body, paginate }) => {
+    rejectFileSentinels(method, field, body);
     const argv = ["api", "-X", method];
     for (const f of field ?? []) argv.push("-f", f);
     if (body) argv.push("--body", body);

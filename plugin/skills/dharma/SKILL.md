@@ -33,7 +33,10 @@ If `CLAUDE_PLUGIN_ROOT` is unset, the plugin root is two directories above this 
 "$DHARMA" task search --text "keyword" --completed=false --fields name
 "$DHARMA" task get <gid> --fields name,notes,assignee.name
 "$DHARMA" task create --name "Do the thing" --project <gid> --assignee me
-"$DHARMA" task comment <gid> --text "..."
+# Comment text is read from stdin (quotes/apostrophes/newlines need no
+# escaping). For arbitrary or untrusted text, write it to a file and redirect —
+# no shell escaping, and nothing to collide with a heredoc delimiter:
+"$DHARMA" task comment <gid> < comment.txt
 ```
 
 For endpoints without a typed command, `dharma api` works like `gh api` (`"$DHARMA" api --help` documents the `-f`/`--body` semantics):

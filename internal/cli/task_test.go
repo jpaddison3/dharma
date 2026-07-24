@@ -42,6 +42,47 @@ func TestTruncateText(t *testing.T) {
 	}
 }
 
+// --text, when set, wins and stdin is never read (so it can't block).
+func TestResolveCommentTextFlagWins(t *testing.T) {
+	withStdin(t, "stdin should be ignored")
+	got, err := resolveCommentText("from flag", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "from flag" {
+		t.Errorf("got %q, want the --text value", got)
+	}
+	if stdinConsumed {
+		t.Error("stdin was read even though --text was set")
+	}
+}
+
+// The stdin default is the command's headline path: read stdin, strip exactly
+// one trailing newline so a piped file or heredoc reads like $(cat file).
+func TestResolveCommentTextStdinDefault(t *testing.T) {
+	withStdin(t, "a comment\nwith a newline\n")
+	got, err := resolveCommentText("", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "a comment\nwith a newline" {
+		t.Errorf("got %q, want one trailing newline stripped", got)
+	}
+}
+
+// Empty stdin resolves to "" — RunE turns that into the "comment text is empty"
+// usage error rather than posting a blank comment.
+func TestResolveCommentTextEmptyStdin(t *testing.T) {
+	withStdin(t, "")
+	got, err := resolveCommentText("", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty string", got)
+	}
+}
+
 func TestExtractNames(t *testing.T) {
 	got := extractNames([]interface{}{
 		map[string]interface{}{"name": "a"},
