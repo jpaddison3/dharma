@@ -30,10 +30,22 @@ Examples:
   dharma api -X POST /tasks -f name=Foo -f projects=1234567890
   dharma api /workspaces/123/tasks --paginate
   dharma api -X PUT /tasks/123 --body '{"data": {"completed": true}}'
+  dharma api -X POST /tasks/123/stories -f text=@- <<'EOF'
+  It's "quoted" text — no escaping needed.
+  EOF
 
 -f key=value becomes a query parameter on GET/DELETE/HEAD and a body field
 (wrapped in Asana's {"data": ...} envelope) on POST/PUT/PATCH. --body passes
-raw JSON through unchanged.`,
+raw JSON through unchanged.
+
+Shell-unsafe text (quotes, apostrophes, newlines) can be piped or read from a
+file instead of quoted on the command line, for POST/PUT/PATCH only: --body -
+and -f key=@- read the value from stdin; --body @file and -f key=@file read it
+from a file. At most one '-'/'@-' source is allowed per invocation, since
+stdin can only be read once. This only applies to bodies — a GET/DELETE/HEAD
+-f value is always literal, so a leading '@' in a query filter (e.g.
+text=@handle) passes through unchanged. A body field that must literally
+start with '@' can't go through -f; use --body instead.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
@@ -61,11 +73,27 @@ raw JSON through unchanged.`,
 			if !hasBody {
 				return usageErrorf("--body is not valid for %s requests", method)
 			}
+			resolvedBody := apiRawBody
+			switch {
+			case apiRawBody == "-", apiRawBody == "@-":
+				s, err := readAllStdin()
+				if err != nil {
+					return err
+				}
+				resolvedBody = s
+			case strings.HasPrefix(apiRawBody, "@"):
+				bodyFile := apiRawBody[1:]
+				b, err := os.ReadFile(bodyFile)
+				if err != nil {
+					return usageErrorf("reading @%s: %v", bodyFile, err)
+				}
+				resolvedBody = string(b)
+			}
 			var v interface{}
-			if err := json.Unmarshal([]byte(apiRawBody), &v); err != nil {
+			if err := json.Unmarshal([]byte(resolvedBody), &v); err != nil {
 				return usageErrorf("invalid --body JSON: %v", err)
 			}
-			rawBody = []byte(apiRawBody)
+			rawBody = []byte(resolvedBody)
 		case len(apiFields) > 0:
 			if hasBody {
 				m := make(map[string]string)
@@ -73,6 +101,10 @@ raw JSON through unchanged.`,
 					k, v, ok := strings.Cut(f, "=")
 					if !ok {
 						return usageErrorf("--field must be key=value, got %q", f)
+					}
+					v, err := expandAtValue(v)
+					if err != nil {
+						return err
 					}
 					m[k] = v
 				}
@@ -134,6 +166,6 @@ raw JSON through unchanged.`,
 func init() {
 	apiCmd.Flags().StringVarP(&apiMethod, "method", "X", "GET", "HTTP method")
 	apiCmd.Flags().StringArrayVarP(&apiFields, "field", "f", nil, "key=value field (repeatable)")
-	apiCmd.Flags().StringVar(&apiRawBody, "body", "", "raw JSON body (overrides --field, no envelope wrapping)")
+	apiCmd.Flags().StringVar(&apiRawBody, "body", "", "raw JSON body, or '-'/'@file' to read it (overrides --field, no envelope wrapping)")
 	apiCmd.Flags().BoolVar(&apiPaginate, "paginate", false, "follow next_page for collection endpoints (GET only)")
 }
