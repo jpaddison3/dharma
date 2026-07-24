@@ -30,9 +30,6 @@ Examples:
   dharma api -X POST /tasks -f name=Foo -f projects=1234567890
   dharma api /workspaces/123/tasks --paginate
   dharma api -X PUT /tasks/123 --body '{"data": {"completed": true}}'
-  dharma api -X POST /tasks/123/stories -f text=@- <<'EOF'
-  It's "quoted" text — no escaping needed.
-  EOF
 
 -f key=value becomes a query parameter on GET/DELETE/HEAD and a body field
 (wrapped in Asana's {"data": ...} envelope) on POST/PUT/PATCH. --body passes
@@ -45,7 +42,19 @@ from a file. At most one '-'/'@-' source is allowed per invocation, since
 stdin can only be read once. This only applies to bodies — a GET/DELETE/HEAD
 -f value is always literal, so a leading '@' in a query filter (e.g.
 text=@handle) passes through unchanged. A body field that must literally
-start with '@' can't go through -f; use --body instead.`,
+start with '@' can't go through -f; use --body instead.
+
+For arbitrary text, a file needs no shell escaping and can't collide with a
+heredoc delimiter:
+
+dharma api -X POST /tasks/123/stories -f text=@- < body.txt
+
+A quoted-delimiter heredoc also works, but its closing delimiter must start
+its own line (column 0) and must not appear in the text:
+
+dharma api -X POST /tasks/123/stories -f text=@- <<'DHARMA_EOF'
+It's "quoted" text — no escaping needed.
+DHARMA_EOF`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
@@ -73,21 +82,9 @@ start with '@' can't go through -f; use --body instead.`,
 			if !hasBody {
 				return usageErrorf("--body is not valid for %s requests", method)
 			}
-			resolvedBody := apiRawBody
-			switch {
-			case apiRawBody == "-", apiRawBody == "@-":
-				s, err := readAllStdin()
-				if err != nil {
-					return err
-				}
-				resolvedBody = s
-			case strings.HasPrefix(apiRawBody, "@"):
-				bodyFile := apiRawBody[1:]
-				b, err := os.ReadFile(bodyFile)
-				if err != nil {
-					return usageErrorf("reading @%s: %v", bodyFile, err)
-				}
-				resolvedBody = string(b)
+			resolvedBody, err := resolveBody(apiRawBody)
+			if err != nil {
+				return err
 			}
 			var v interface{}
 			if err := json.Unmarshal([]byte(resolvedBody), &v); err != nil {
@@ -95,28 +92,14 @@ start with '@' can't go through -f; use --body instead.`,
 			}
 			rawBody = []byte(resolvedBody)
 		case len(apiFields) > 0:
+			m, q, err := buildAPIFields(apiFields, hasBody)
+			if err != nil {
+				return err
+			}
 			if hasBody {
-				m := make(map[string]string)
-				for _, f := range apiFields {
-					k, v, ok := strings.Cut(f, "=")
-					if !ok {
-						return usageErrorf("--field must be key=value, got %q", f)
-					}
-					v, err := expandAtValue(v)
-					if err != nil {
-						return err
-					}
-					m[k] = v
-				}
 				body = m
 			} else {
-				for _, f := range apiFields {
-					k, v, ok := strings.Cut(f, "=")
-					if !ok {
-						return usageErrorf("--field must be key=value, got %q", f)
-					}
-					query.Add(k, v)
-				}
+				query = q
 			}
 		}
 
@@ -161,6 +144,51 @@ start with '@' can't go through -f; use --body instead.`,
 		}
 		return output.PrintJSON(os.Stdout, map[string]interface{}{"data": all})
 	},
+}
+
+// resolveBody resolves a --body value: a lone "-" or "@-" reads stdin, "@file"
+// reads a file, anything else is a literal. It shares the @-grammar with -f via
+// expandAtValue (bare "-" is a --body-only alias for "@-"), so the two input
+// paths can't drift and the file/stdin branches are covered by expandAtValue's
+// tests. Trailing-newline trimming is inert here — the caller JSON-parses the
+// result, and JSON ignores trailing whitespace.
+func resolveBody(spec string) (string, error) {
+	if spec == "-" {
+		spec = "@-"
+	}
+	return expandAtValue(spec)
+}
+
+// buildAPIFields splits each key=value -f entry. On body methods a leading '@'
+// is expanded (file/stdin) into a JSON body map; otherwise values stay literal
+// query parameters. Both directions live here so a test can assert the
+// security-relevant invariant: '@' expands only when there is a request body,
+// never in a GET/DELETE/HEAD query value.
+func buildAPIFields(fields []string, hasBody bool) (map[string]string, url.Values, error) {
+	if hasBody {
+		m := make(map[string]string)
+		for _, f := range fields {
+			k, v, ok := strings.Cut(f, "=")
+			if !ok {
+				return nil, nil, usageErrorf("--field must be key=value, got %q", f)
+			}
+			v, err := expandAtValue(v)
+			if err != nil {
+				return nil, nil, err
+			}
+			m[k] = v
+		}
+		return m, nil, nil
+	}
+	query := url.Values{}
+	for _, f := range fields {
+		k, v, ok := strings.Cut(f, "=")
+		if !ok {
+			return nil, nil, usageErrorf("--field must be key=value, got %q", f)
+		}
+		query.Add(k, v)
+	}
+	return nil, query, nil
 }
 
 func init() {

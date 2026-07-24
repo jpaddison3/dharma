@@ -5,7 +5,18 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"golang.org/x/term"
 )
+
+// isInteractive reports whether f is a real terminal. Used to decide whether to
+// print a "reading from stdin" hint, so it must be true only for an interactive
+// user — term.IsTerminal (already used by auth.go's readSecret) is the right
+// test: os.ModeCharDevice also matches /dev/null, which would fire the hint on
+// every non-interactive `< /dev/null` caller (e.g. a bare Claude Code Bash run).
+func isInteractive(f *os.File) bool {
+	return term.IsTerminal(int(f.Fd()))
+}
 
 // stdinReader is where readAllStdin reads from. A package var so tests can
 // inject a strings.Reader instead of the real os.Stdin.

@@ -300,29 +300,47 @@ var taskCreateCmd = &cobra.Command{
 
 var taskCommentText string
 
+// resolveCommentText returns the comment body: the --text value when the flag
+// was set, otherwise stdin with one trailing newline stripped (so a piped file
+// or heredoc reads the same as $(cat file)). Split out from RunE so the
+// stdin-default path — the command's primary use — is unit-testable.
+func resolveCommentText(flagText string, flagChanged bool) (string, error) {
+	if flagChanged {
+		return flagText, nil
+	}
+	s, err := readAllStdin()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(s, "\n"), nil
+}
+
 var taskCommentCmd = &cobra.Command{
 	Use:   "comment <gid>",
 	Short: "Add a comment (story) to a task",
 	Long: `Add a comment (story) to a task. Comment text is read from stdin by default,
-so quotes, apostrophes, and newlines all pass through without shell escaping:
+so quotes, apostrophes, and newlines all pass through without shell escaping.
+The safest source for arbitrary text is a file or pipe:
 
-  dharma task comment 1234567890 <<'EOF'
-  Comment text goes here — quotes, apostrophes, newlines all fine.
-  EOF
+dharma task comment 1234567890 < comment.txt
+
+A quoted-delimiter heredoc works for interactive use, but its closing
+delimiter must start its own line (column 0) and must not appear in the text:
+
+dharma task comment 1234567890 <<'DHARMA_EOF'
+Comment text goes here — quotes, apostrophes, newlines all fine.
+DHARMA_EOF
 
 --text still works for short one-liners.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		text := taskCommentText
-		if !cmd.Flags().Changed("text") {
-			if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
-				fmt.Fprintln(os.Stderr, "reading comment text from stdin — pipe text or type, then Ctrl-D")
-			}
-			s, err := readAllStdin()
-			if err != nil {
-				return err
-			}
-			text = strings.TrimSuffix(s, "\n")
+		changed := cmd.Flags().Changed("text")
+		if !changed && isInteractive(os.Stdin) {
+			fmt.Fprintln(os.Stderr, "reading comment text from stdin — pipe text or type, then Ctrl-D")
+		}
+		text, err := resolveCommentText(taskCommentText, changed)
+		if err != nil {
+			return err
 		}
 		if text == "" {
 			return usageErrorf("comment text is empty")
