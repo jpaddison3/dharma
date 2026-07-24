@@ -33,7 +33,9 @@ If `CLAUDE_PLUGIN_ROOT` is unset, the plugin root is two directories above this 
 "$DHARMA" task search --text "keyword" --completed=false --fields name
 "$DHARMA" task get <gid> --fields name,notes,assignee.name
 "$DHARMA" task create --name "Do the thing" --project <gid> --assignee me
-"$DHARMA" task comment <gid> --text "..."
+"$DHARMA" task comment <gid> <<'EOF'
+Comment text goes here — quotes, apostrophes, newlines all fine.
+EOF
 ```
 
 For endpoints without a typed command, `dharma api` works like `gh api` (`"$DHARMA" api --help` documents the `-f`/`--body` semantics):

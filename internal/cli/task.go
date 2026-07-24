@@ -303,16 +303,35 @@ var taskCommentText string
 var taskCommentCmd = &cobra.Command{
 	Use:   "comment <gid>",
 	Short: "Add a comment (story) to a task",
-	Args:  cobra.ExactArgs(1),
+	Long: `Add a comment (story) to a task. Comment text is read from stdin by default,
+so quotes, apostrophes, and newlines all pass through without shell escaping:
+
+  dharma task comment 1234567890 <<'EOF'
+  Comment text goes here — quotes, apostrophes, newlines all fine.
+  EOF
+
+--text still works for short one-liners.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if taskCommentText == "" {
-			return usageErrorf("--text is required")
+		text := taskCommentText
+		if !cmd.Flags().Changed("text") {
+			if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+				fmt.Fprintln(os.Stderr, "reading comment text from stdin — pipe text or type, then Ctrl-D")
+			}
+			s, err := readAllStdin()
+			if err != nil {
+				return err
+			}
+			text = strings.TrimSuffix(s, "\n")
+		}
+		if text == "" {
+			return usageErrorf("comment text is empty")
 		}
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		return runPost(context.Background(), c, "/tasks/"+args[0]+"/stories", map[string]interface{}{"text": taskCommentText})
+		return runPost(context.Background(), c, "/tasks/"+args[0]+"/stories", map[string]interface{}{"text": text})
 	},
 }
 
@@ -665,7 +684,7 @@ func init() {
 	taskCreateCmd.Flags().StringVar(&taskCreateNotes, "notes", "", "task description")
 	taskCreateCmd.Flags().StringVar(&taskCreateAssignee, "assignee", "", "assignee gid")
 
-	taskCommentCmd.Flags().StringVar(&taskCommentText, "text", "", "comment text (URLs are auto-linked by Asana)")
+	taskCommentCmd.Flags().StringVar(&taskCommentText, "text", "", "comment text (default: read from stdin; URLs are auto-linked by Asana)")
 
 	taskMoveCmd.Flags().StringVar(&taskMoveSection, "section", "", "destination section gid")
 
