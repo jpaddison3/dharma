@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -152,6 +153,13 @@ func TestCleanDisconnect(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("`dharma mcp` exited %v on a normal disconnect, want 0\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
 	}
+	// Nothing should reach the host's MCP log on a clean session. The SDK's
+	// default logger discards, so setting one (as an earlier revision did)
+	// would put six INFO lines and an ERROR for this very disconnect in front
+	// of a colleague debugging something else.
+	if stderr.String() != "" {
+		t.Errorf("clean session wrote to stderr, which the host logs:\n%s", stderr.String())
+	}
 	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
 		if line == "" {
 			continue
@@ -263,19 +271,22 @@ func TestArgvBuilders(t *testing.T) {
 
 	// The stub accepts anything, so the argv assertions above are only as good
 	// as the flags existing in internal/cli. Replay each one against the real
-	// binary (no token, empty config: it fails on auth, never on parsing) and
-	// require that it got past flag parsing.
+	// binary with no token and an empty config: a well-formed invocation gets
+	// all the way to token resolution and exits 2 ("no token found"), while
+	// anything cobra rejects — unknown flag, wrong arity, a flag that changed
+	// type — exits 3 first. Asserting the exit code catches every parse-class
+	// break, not just the ones that produce a known error string.
 	t.Run("every argv parses against the real CLI", func(t *testing.T) {
 		bin := buildDharmaForTest(t)
 		emptyConfig := t.TempDir()
 		for _, tc := range tests {
 			cmd := exec.Command(bin, tc.want...)
 			cmd.Env = append(filterEnv("ASANA_TOKEN", "ASANA_WORKSPACE", "XDG_CONFIG_HOME"), "XDG_CONFIG_HOME="+emptyConfig)
-			out, _ := cmd.CombinedOutput()
-			for _, bad := range []string{"unknown flag", "unknown shorthand flag", "unknown command", "flag needs an argument"} {
-				if strings.Contains(string(out), bad) {
-					t.Errorf("%s: `dharma %s` -> %s\n%s", tc.name, strings.Join(tc.want, " "), bad, out)
-				}
+			out, err := cmd.CombinedOutput()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
+				t.Errorf("%s: `dharma %s` exited %v, want 2 (reached auth, i.e. parsed)\n%s",
+					tc.name, strings.Join(tc.want, " "), err, out)
 			}
 		}
 	})
@@ -591,14 +602,15 @@ func withCap(t *testing.T, n int) {
 // (small enough to fit the pipe buffer, so it never blocks), then closes
 // stdout and keeps running. That is the shape SIGPIPE cannot stop: with no
 // further writes the child never notices the closed pipe, so only the caller
-// killing it ends the tool call.
+// killing it ends the tool call. Its sleep is far longer than the test's hang
+// guard so the guard can't be beaten by the child exiting on its own.
 func writeFloodStub(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "dharma-flood")
 	script := `#!/bin/sh
 printf '%8192d' 0
 exec 1>&-
-sleep 30
+sleep 300
 `
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)

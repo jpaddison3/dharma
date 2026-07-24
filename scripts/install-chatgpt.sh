@@ -74,11 +74,11 @@ else
     # dharma auth login" tool error rather than breaking.
     env -u XDG_CONFIG_HOME "$BIN" auth login </dev/tty || {
       echo "authentication didn't complete. Finish it later with:" >&2
-      echo "  $BIN auth login" >&2
+      echo "  env -u XDG_CONFIG_HOME $BIN auth login" >&2
     }
   else
     echo "no interactive terminal available here — run this manually to authenticate:"
-    echo "  $BIN auth login"
+    echo "  env -u XDG_CONFIG_HOME $BIN auth login"
   fi
 fi
 
@@ -132,10 +132,11 @@ register_via_toml() (
   ' "$config" > "$stripped" || { rm -f "$stripped"; exit 1; }
   # A surviving `dharma` definition means the strip missed a spelling, and
   # appending now would declare the table twice — which makes every Codex app
-  # reject the whole file. The pattern therefore covers each spelling TOML
-  # allows that the awk above doesn't strip: a header with internal whitespace
-  # or single/double quotes, and dotted or quoted keys under [mcp_servers]
-  # (`dharma.command =`, `dharma = {...}`, `'dharma'.command =`). Matching too
+  # reject the whole file. The pattern covers the three shapes the awk above
+  # doesn't strip: a header with internal whitespace, quotes, or double
+  # brackets; a top-level dotted key (`mcp_servers.dharma.command = ...`,
+  # which needs no [mcp_servers] header at all); and a dotted or quoted key
+  # under [mcp_servers] (`dharma.command =`, `dharma = {...}`). Matching too
   # much only costs a bail-out; matching too little corrupts the file.
   #
   # A [mcp_servers.dharma.env] sub-table is deliberately not matched: it
@@ -143,19 +144,25 @@ register_via_toml() (
   # ASANA_WORKSPACE lives. Note that a stale env.ASANA_TOKEN there outranks the
   # config file's token, so re-running this installer cannot fix "still the old
   # account" — that sub-table has to be removed by hand.
-  if grep -Eq "^[[:space:]]*(\[[[:space:]]*mcp_servers[[:space:]]*\.[[:space:]]*[\"']?dharma[\"']?[[:space:]]*\]|[\"']?dharma[\"']?[[:space:]]*[.=])" "$stripped"; then
+  if grep -Eq "^[[:space:]]*(\[+[[:space:]]*[\"']?mcp_servers[\"']?[[:space:]]*\.[[:space:]]*[\"']?dharma[\"']?[[:space:]]*\]|[\"']?mcp_servers[\"']?[[:space:]]*\.[[:space:]]*[\"']?dharma[\"']?[[:space:]]*[.=]|[\"']?dharma[\"']?[[:space:]]*[.=])" "$stripped"; then
     rm -f "$stripped"
     exit 2
   fi
+  # A fresh temp file in the same directory, not a fixed "$config.new": a stale
+  # one left 0644 by an earlier interrupted run would be truncated in place,
+  # keeping its mode, and then moved over the real config with every other
+  # server's secrets inside it. Same directory so the mv is a rename.
+  local merged
+  merged="$(mktemp "$(dirname "$config")/config.toml.XXXXXX")" || { rm -f "$stripped"; exit 1; }
   {
     cat "$stripped"
     echo ""
     echo "[mcp_servers.dharma]"
     printf 'command = "%s"\n' "$BIN"
     echo 'args = ["mcp"]'
-  } > "$config.new" || { rm -f "$stripped" "$config.new"; exit 1; }
+  } > "$merged" || { rm -f "$stripped" "$merged"; exit 1; }
   rm -f "$stripped"
-  mv "$config.new" "$config"
+  mv "$merged" "$config"
 )
 
 # The guard above returns 2 (rather than 1) when it found a dharma entry it
@@ -187,11 +194,20 @@ codex_config="$HOME/.codex/config.toml"
 # colleague get manual steps.
 register_via_codex() {
   command -v codex >/dev/null 2>&1 || return 1
-  if codex mcp get dharma --json 2>/dev/null | grep -qF "\"$BIN\""; then
-    echo "dharma is already registered with codex mcp at $BIN — leaving its settings alone."
-    return 0
-  fi
-  if codex mcp get dharma >/dev/null 2>&1; then
+  # Match on the whole transport, not just the path: an entry pointing at this
+  # binary with different args (or a disabled one) is not a working
+  # registration, and skipping the add would report success for something that
+  # never starts. tr squeezes the pretty-printed JSON onto one line so the
+  # command, its args, and enabled can be matched together.
+  local entry
+  entry="$(codex mcp get dharma --json 2>/dev/null | tr -d ' \n' || true)"
+  case "$entry" in
+    *"\"enabled\":true"*"\"command\":\"$BIN\",\"args\":[\"mcp\"]"*)
+      echo "dharma is already registered and enabled with codex mcp at $BIN — leaving its settings alone."
+      return 0
+      ;;
+  esac
+  if [ -n "$entry" ]; then
     echo "note: replacing an existing codex mcp entry for dharma — any custom env," >&2
     echo "      timeout, or approval settings on it are reset." >&2
   fi

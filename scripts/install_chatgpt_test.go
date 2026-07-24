@@ -111,6 +111,33 @@ ASANA_WORKSPACE = "111"
 			config:   "[mcp_servers]\ndharma.command = \"/old/dharma\"\ndharma.args = [\"mcp\"]\n",
 			wantCode: foundExisting,
 		},
+		// Top-level dotted keys declare the same table with no [mcp_servers]
+		// header at all, so the strip never sees a header to match.
+		{
+			name:     "bails on top-level dotted keys",
+			config:   "mcp_servers.dharma.command = \"/old/dharma\"\nmcp_servers.dharma.args = [\"mcp\"]\n",
+			wantCode: foundExisting,
+		},
+		{
+			name:     "bails on a top-level inline table",
+			config:   "mcp_servers.dharma = { command = \"/old/dharma\", args = [\"mcp\"] }\n",
+			wantCode: foundExisting,
+		},
+		{
+			name:     "bails on a quoted top-level dotted key",
+			config:   "mcp_servers.\"dharma\".command = \"/old/dharma\"\n",
+			wantCode: foundExisting,
+		},
+		{
+			name:     "bails on a quoted table name in the header",
+			config:   "[\"mcp_servers\".dharma]\ncommand = \"/old/dharma\"\n",
+			wantCode: foundExisting,
+		},
+		{
+			name:     "bails on an array-of-tables header",
+			config:   "[[mcp_servers.dharma]]\ncommand = \"/old/dharma\"\n",
+			wantCode: foundExisting,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -191,6 +218,9 @@ func TestRegisterViaTomlDoesNotFalseBail(t *testing.T) {
 [projects."/Users/me/dev/dharma"]
 trust_level = "trusted"
 
+[mcp_servers.dharma2]
+command = "/usr/local/bin/dharma2"
+
 [mcp_servers.other]
 command = "/usr/local/bin/dharma-lookalike"
 `
@@ -200,8 +230,11 @@ command = "/usr/local/bin/dharma-lookalike"
 	if code, out := runRegisterViaToml(t, config); code != registered {
 		t.Fatalf("exit = %d, want a normal registration; output: %s", code, out)
 	}
-	if got := readFile(t, config); !strings.Contains(got, `[projects."/Users/me/dev/dharma"]`) {
-		t.Errorf("unrelated project entry lost:\n%s", got)
+	got := readFile(t, config)
+	for _, want := range []string{`[projects."/Users/me/dev/dharma"]`, `[mcp_servers.dharma2]`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("unrelated entry %s lost:\n%s", want, got)
+		}
 	}
 }
 

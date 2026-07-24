@@ -192,19 +192,7 @@ func parseWorkspaces(stdout string) ([]asanaWorkspace, error) {
 func (s *server) fetchSingleWorkspace(ctx context.Context, discarded bool) (string, error) {
 	res := s.runDharma(ctx, noWorkspace, "workspace", "list")
 	if !res.ok {
-		// Same preference order as asResult: dharma's structured
-		// {"ok":false,"error":{...}} envelope goes to stdout, and it is the
-		// only place http_status and help live — dropping it would make a
-		// rejected token on the first workspace-scoped call less informative
-		// than the identical failure on any other call.
-		msg := strings.TrimSpace(res.stdout)
-		if msg == "" {
-			msg = strings.TrimSpace(res.stderr)
-		}
-		if msg == "" {
-			msg = res.errMsg
-		}
-		return "", fmt.Errorf("could not list workspaces: %s", msg)
+		return "", fmt.Errorf("could not list workspaces: %s", res.failureText())
 	}
 	workspaces, err := parseWorkspaces(res.stdout)
 	if err != nil {
@@ -320,26 +308,28 @@ func (s *server) runDharma(ctx context.Context, workspace string, args ...string
 	return res
 }
 
-// asResult converts a dharma invocation into a tool result. On failure it
-// prefers the structured {"ok":false,"error":{...}} envelope dharma writes to
-// stdout (so the model gets http_status/help), falling back to stderr or the
-// exec error. On success, a stderr caveat (e.g. "results truncated") is
+// failureText is what to tell the model when a dharma call fails: the
+// structured {"ok":false,"error":{...}} envelope dharma writes to stdout is
+// preferred because it is the only place http_status and help live, then
+// stderr, then the exec error. Shared so a failure reported through workspace
+// resolution reads the same as one reported through a tool result.
+func (r dharmaResult) failureText() string {
+	for _, text := range []string{strings.TrimSpace(r.stdout), strings.TrimSpace(r.stderr), r.errMsg} {
+		if text != "" {
+			return text
+		}
+	}
+	return "dharma failed with no output"
+}
+
+// asResult converts a dharma invocation into a tool result. A failure carries
+// failureText above. On success, a stderr caveat (e.g. "results truncated") is
 // appended so the model sees it even though the call succeeded. Port of
 // asResult, index.js:121-142.
 func asResult(res dharmaResult) *mcp.CallToolResult {
 	if !res.ok {
-		text := strings.TrimSpace(res.stdout)
-		if text == "" {
-			text = strings.TrimSpace(res.stderr)
-		}
-		if text == "" {
-			text = res.errMsg
-		}
-		if text == "" {
-			text = "dharma failed with no output"
-		}
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+			Content: []mcp.Content{&mcp.TextContent{Text: res.failureText()}},
 			IsError: true,
 		}
 	}
