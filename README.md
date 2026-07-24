@@ -148,6 +148,24 @@ ASANA_TOKEN=... node mcpb/smoke.mjs
 
 Caveat for distribution: the bundled binary is unsigned. A bundle downloaded via Slack/browser gets macOS quarantine, and Gatekeeper may block the binary on first run on the recipient's machine — test that path before sending it widely.
 
+## ChatGPT desktop (MCP)
+
+For colleagues on a paid ChatGPT plan: a native `dharma mcp` command that ChatGPT desktop runs as a local stdio MCP server — no Node, npm, or `.mcpb` install needed.
+
+Prerequisites: macOS, the ChatGPT desktop app, and a paid ChatGPT plan (required for custom MCP servers).
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jpaddison3/dharma/main/scripts/install-chatgpt.sh | bash
+```
+
+This downloads the latest release binary to `~/.local/bin/dharma`, prompts for an Asana PAT if one isn't already configured, and registers `dharma mcp` in Codex's shared MCP config (`~/.codex/config.toml`), which ChatGPT desktop also reads. Re-run the same one-liner to update — it replaces the binary and re-registers the MCP server idempotently.
+
+Your PAT is stored in plaintext at `~/.config/dharma/config.json` (0600, readable only by you) — the same config `dharma auth login` always uses. If this machine is ever compromised, revoke it at your [Asana Apps settings](https://app.asana.com/0/my-apps).
+
+After installing, open ChatGPT desktop → Settings → MCP servers, confirm `dharma` is listed and enabled, and ask ChatGPT to run `whoami` to verify it can reach your Asana account.
+
+Codex CLI and the Codex IDE extension read the same `~/.codex/config.toml`, so they should pick up `dharma` for free — an untested byproduct of targeting that config file.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

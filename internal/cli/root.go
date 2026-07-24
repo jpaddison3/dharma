@@ -20,6 +20,9 @@ var (
 	flagOutput    string
 )
 
+// version is stamped by main.go via Execute; "dev" for a plain `go build`/`go run`.
+var version = "dev"
+
 // commandRan is set once a command body is reached (after flag/arg parsing
 // succeeds), letting Execute tell a usage/parse error apart from an
 // operational one — see classifyError.
@@ -62,10 +65,14 @@ func (e *AuthError) Error() string { return e.msg }
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagToken, "token", "", "Asana PAT (env: ASANA_TOKEN)")
 	rootCmd.PersistentFlags().StringVar(&flagWorkspace, "workspace", "", "workspace gid (env: ASANA_WORKSPACE)")
-	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "log HTTP requests to stderr")
+	// -v is claimed here deliberately: with rootCmd.Version set, cobra adds a
+	// --version flag and gives it the -v shorthand if nothing else has taken
+	// it, so without this line `dharma -v user me` means --version and fails
+	// with "unknown command".
+	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "log HTTP requests to stderr")
 	rootCmd.PersistentFlags().StringVar(&flagOutput, "output", "json", "output format: json or toon (experimental)")
 
-	rootCmd.AddCommand(authCmd, apiCmd, userCmd, taskCmd, myTasksCmd, projectCmd, sectionCmd, tagCmd, workspaceCmd, attachmentCmd)
+	rootCmd.AddCommand(authCmd, apiCmd, userCmd, taskCmd, myTasksCmd, projectCmd, sectionCmd, tagCmd, workspaceCmd, attachmentCmd, mcpCmd)
 }
 
 // errorEnvelope is the failure shape printed to stdout: an `ok:false`
@@ -82,7 +89,9 @@ type errorPayload struct {
 	Help       string `json:"help,omitempty"`
 }
 
-func Execute() {
+func Execute(v string) {
+	version = v
+	rootCmd.Version = v
 	err := rootCmd.Execute()
 	if err == nil {
 		return
