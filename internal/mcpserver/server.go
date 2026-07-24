@@ -13,12 +13,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jpaddison3/dharma/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -35,11 +35,13 @@ func Serve(ctx context.Context, version string) error {
 	}
 	srv := &server{binPath: bin, discardedWorkspaceEnv: sanitizeEnv()}
 
-	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "dharma-asana", Version: version}, &mcp.ServerOptions{
-		// Never let incidental SDK logging reach stdout, which stdio reserves
-		// for the JSON-RPC stream.
-		Logger: slog.New(slog.NewTextHandler(os.Stderr, nil)),
-	})
+	// No Logger option: the SDK's default is slog.DiscardHandler, so it never
+	// writes anywhere — including stdout, which stdio reserves for the
+	// JSON-RPC stream. Setting a handler here would turn logging on rather
+	// than redirect it, and its per-session INFO lines (plus an ERROR on the
+	// ordinary client disconnect below) would be the only thing a colleague
+	// sees in the host's MCP log.
+	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "dharma-asana", Version: version}, nil)
 	if err := srv.registerTools(mcpServer); err != nil {
 		return fmt.Errorf("registering tools: %w", err)
 	}
@@ -50,9 +52,12 @@ func Serve(ctx context.Context, version string) error {
 }
 
 // codeServerClosing is the JSON-RPC error code the SDK's connection layer
-// reports when the transport shuts down mid-session (jsonrpc2.ErrServerClosing).
-// The host closing stdin at quit surfaces as "server is closing: EOF", which is
-// how every normal session ends — not a failure worth an exit code.
+// reports when the transport shuts down mid-session (jsonrpc2.ErrServerClosing,
+// an unexported constant reached here through the exported jsonrpc.Error type).
+// An idle session ends with Run returning nil; this code appears when the host
+// closes stdin with a response still in flight ("server is closing: EOF"),
+// which is an ordinary quit, not a failure worth a nonzero exit. If a future
+// SDK renumbers or stops wrapping it, TestCleanDisconnect fails.
 const codeServerClosing = -32004
 
 // isDisconnect reports whether err is just the client going away.
@@ -187,7 +192,15 @@ func parseWorkspaces(stdout string) ([]asanaWorkspace, error) {
 func (s *server) fetchSingleWorkspace(ctx context.Context, discarded bool) (string, error) {
 	res := s.runDharma(ctx, noWorkspace, "workspace", "list")
 	if !res.ok {
-		msg := strings.TrimSpace(res.stderr)
+		// Same preference order as asResult: dharma's structured
+		// {"ok":false,"error":{...}} envelope goes to stdout, and it is the
+		// only place http_status and help live — dropping it would make a
+		// rejected token on the first workspace-scoped call less informative
+		// than the identical failure on any other call.
+		msg := strings.TrimSpace(res.stdout)
+		if msg == "" {
+			msg = strings.TrimSpace(res.stderr)
+		}
 		if msg == "" {
 			msg = res.errMsg
 		}
@@ -229,27 +242,42 @@ type dharmaResult struct {
 // shim's execFile maxBuffer (index.js:76). Without a cap, a model-chosen
 // `paginate: true` over a large collection can return hundreds of megabytes
 // through a long-lived server — useless to the model and a plausible OOM.
-const maxOutputBytes = 32 << 20
+// A var, not a const, only so tests can lower it.
+var maxOutputBytes = 32 << 20
 
 // errOutputTooLarge is what a capped call reports instead. Unlike Node, which
 // hands back the truncated (and therefore unparseable) stdout alongside its
 // maxBuffer error, this drops the partial payload: a bounded, actionable
 // message is strictly more useful to the model than a mangled JSON prefix.
-var errOutputTooLarge = errors.New("dharma output exceeded 32MB and was discarded — narrow the request (drop paginate, add filters, or request fewer fields)")
+func errOutputTooLarge() error {
+	return fmt.Errorf(
+		"dharma output exceeded the %d-byte cap and was discarded — narrow the request (drop paginate, add filters, or request fewer fields)",
+		maxOutputBytes,
+	)
+}
 
-// limitedBuffer captures at most limit bytes and then fails the write, which
-// makes os/exec close the pipe and the subprocess die on its next write —
-// the same "stop the runaway command" behavior Node's maxBuffer has.
+// limitedBuffer captures at most maxOutputBytes and then fails the write,
+// which makes os/exec close the pipe. That alone only stops a child that
+// writes again (SIGPIPE); one that goes quiet and keeps working would hold
+// cmd.Run until it exited on its own, so the first overflow also calls
+// onExceed, which runDharma wires to killing the child — the immediate stop
+// Node's maxBuffer gives.
 type limitedBuffer struct {
 	buf      bytes.Buffer
 	exceeded bool
+	onExceed func()
 }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
 	if room := maxOutputBytes - b.buf.Len(); len(p) > room {
 		b.buf.Write(p[:room])
-		b.exceeded = true
-		return len(p), errOutputTooLarge
+		if !b.exceeded {
+			b.exceeded = true
+			if b.onExceed != nil {
+				b.onExceed()
+			}
+		}
+		return len(p), errOutputTooLarge()
 	}
 	return b.buf.Write(p)
 }
@@ -262,14 +290,23 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 // noWorkspace, is passed down as ASANA_WORKSPACE so commands that take a
 // workspace get the auto-resolved one; commands that don't ignore it.
 func (s *server) runDharma(ctx context.Context, workspace string, args ...string) dharmaResult {
+	// Canceling this context is how an over-cap capture stops the child:
+	// CommandContext kills the process, so a runaway can't hold the tool call
+	// open by simply not writing again.
+	ctx, kill := context.WithCancel(ctx)
+	defer kill()
 	cmd := exec.CommandContext(ctx, s.binPath, args...)
 	cmd.Env = os.Environ()
 	if workspace != noWorkspace {
 		cmd.Env = append(cmd.Env, "ASANA_WORKSPACE="+workspace)
 	}
-	var stdout, stderr limitedBuffer
+	stdout := limitedBuffer{onExceed: kill}
+	stderr := limitedBuffer{onExceed: kill}
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// Bound the wait for a killed child's pipes to close (e.g. inherited by a
+	// grandchild) rather than blocking the tool call on them.
+	cmd.WaitDelay = time.Second
 	err := cmd.Run()
 	res := dharmaResult{ok: err == nil, stdout: stdout.buf.String(), stderr: stderr.buf.String()}
 	if err != nil {
@@ -278,7 +315,7 @@ func (s *server) runDharma(ctx context.Context, workspace string, args ...string
 	if stdout.exceeded || stderr.exceeded {
 		// Whatever the command's own exit status was, the captured output is
 		// a truncated fragment — report the cap, not the fragment.
-		res = dharmaResult{ok: false, errMsg: errOutputTooLarge.Error()}
+		res = dharmaResult{ok: false, errMsg: errOutputTooLarge().Error()}
 	}
 	return res
 }

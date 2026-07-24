@@ -78,8 +78,32 @@ func TestSmoke(t *testing.T) {
 		if !strings.Contains(text, `"ok":false`) {
 			t.Errorf("get_task error text missing structured ok:false envelope: %s", text)
 		}
-		if !strings.Contains(text, "http_status") {
-			t.Errorf("get_task error text missing http_status: %s", text)
+		// The status matters: asserting only that *some* http_status is present
+		// let this subtest pass on the 401 a stale token produces — green
+		// without ever exercising a bad-gid response. Asana answers gid 1 with
+		// 403 ("You do not have access to this task"), not 404.
+		if !strings.Contains(text, `"http_status":403`) {
+			t.Errorf("get_task with an inaccessible gid should report 403: %s", text)
+		}
+	})
+
+	// "a missing or rejected token produces an instructive tool error, not
+	// a crash" — the missing half is covered token-free in TestToolContract;
+	// this is the rejected half, which needs the network but no valid token.
+	t.Run("rejected token", func(t *testing.T) {
+		badTokenSession := connectSmoke(t, ctx, bin, func(cmd *exec.Cmd) {
+			cmd.Env = append(filterEnv("ASANA_TOKEN", "ASANA_WORKSPACE", "XDG_CONFIG_HOME"),
+				"ASANA_TOKEN=definitely-not-a-real-token", "XDG_CONFIG_HOME="+t.TempDir())
+		})
+		res, err := badTokenSession.CallTool(ctx, &mcp.CallToolParams{Name: "whoami", Arguments: map[string]any{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.IsError {
+			t.Fatal("whoami with a rejected token: want isError")
+		}
+		if text := textOf(res); !strings.Contains(text, `"http_status":401`) {
+			t.Errorf("rejected-token error = %q, want the structured 401 envelope", text)
 		}
 	})
 

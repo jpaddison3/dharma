@@ -31,10 +31,12 @@ release_json="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest")
   echo "       (no release published yet, no network, or GitHub's unauthenticated rate limit — try again in an hour)" >&2
   exit 1
 }
+# `|| true`: with pipefail a non-matching grep would kill the script here,
+# before the explicit check below can print something a colleague can act on.
 asset_url="$(printf '%s\n' "$release_json" \
   | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*dharma-macos-universal\.tar\.gz"' \
   | head -n1 \
-  | sed -E 's/^.*"(https[^"]+)"$/\1/')"
+  | sed -E 's/^.*"(https[^"]+)"$/\1/' || true)"
 if [ -z "$asset_url" ]; then
   echo "error: couldn't find a dharma-macos-universal.tar.gz asset on the latest release" >&2
   exit 1
@@ -51,11 +53,12 @@ echo "installed $BIN"
 
 # --- 3. Auth (only if needed) ------------------------------------------
 
-# The probe runs with ASANA_TOKEN stripped: ChatGPT desktop launches from
-# Finder and inherits no shell environment, so a token that only exists in
-# this terminal would make the install look complete while every tool call
-# fails. What counts is a token dharma can find on its own, in its config.
-if env -u ASANA_TOKEN "$BIN" user me >/dev/null 2>&1; then
+# The probe runs with ASANA_TOKEN and XDG_CONFIG_HOME stripped: ChatGPT
+# desktop launches from Finder and inherits no shell environment, so a token
+# that only exists in this terminal — or in a config directory only this shell
+# knows about — would make the install look complete while every tool call
+# fails. What counts is a token dharma can find the way ChatGPT will run it.
+if env -u ASANA_TOKEN -u XDG_CONFIG_HOME "$BIN" user me >/dev/null 2>&1; then
   echo "already authenticated."
 else
   echo "no valid Asana token found."
@@ -64,10 +67,12 @@ else
   # the script — including `auth login`'s own PAT prompt, which is written to
   # stderr, leaving the installer looking hung on an invisible question.
   if { : </dev/tty; } 2>/dev/null; then
-    # Failing to authenticate must not abort the install: registration below
-    # is independent, and an unauthenticated server returns an instructive
-    # "run dharma auth login" tool error rather than breaking.
-    "$BIN" auth login </dev/tty || {
+    # XDG_CONFIG_HOME is stripped here too, so the token is written to the
+    # config the probe reads and ChatGPT desktop will find. Failing to
+    # authenticate must not abort the install: registration below is
+    # independent, and an unauthenticated server returns an instructive "run
+    # dharma auth login" tool error rather than breaking.
+    env -u XDG_CONFIG_HOME "$BIN" auth login </dev/tty || {
       echo "authentication didn't complete. Finish it later with:" >&2
       echo "  $BIN auth login" >&2
     }
@@ -99,12 +104,18 @@ print_manual_mcp_instructions() {
 # bails rather than append a second declaration — a duplicate table makes
 # every one of those apps refuse to load the whole file, breaking MCP servers
 # that have nothing to do with dharma.
-register_via_toml() {
+register_via_toml() (
   local config="$1"
-  mkdir -p "$(dirname "$config")" || return 1
-  touch "$config" || return 1
+  # Everything this function creates carries other servers' env secrets copied
+  # out of the existing config, so nothing it writes may exist as 0644 even
+  # briefly: a umask, not a chmod after the fact, is what makes that true if
+  # the script is interrupted mid-write.
+  umask 077
+  mkdir -p "$(dirname "$config")" || exit 1
+  touch "$config" || exit 1
+  chmod 600 "$config" || exit 1
   local stripped
-  stripped="$(mktemp)" || return 1
+  stripped="$(mktemp)" || exit 1
   # The section-boundary test allows leading whitespace, which TOML permits:
   # anchoring it at column 0 would treat an indented sibling table as part of
   # the dharma block and silently delete someone else's server.
@@ -118,17 +129,23 @@ register_via_toml() {
       while (n > 0 && lines[n] == "") n--
       for (i = 1; i <= n; i++) print lines[i]
     }
-  ' "$config" > "$stripped" || { rm -f "$stripped"; return 1; }
-  # A surviving `dharma` definition means the strip missed a spelling;
-  # appending now would declare the table twice. A [mcp_servers.dharma.env]
-  # sub-table deliberately survives and re-attaches to the fresh block (that
-  # is where a hand-set ASANA_WORKSPACE lives) — but note a stale
-  # env.ASANA_TOKEN there outranks the config file's token, so re-running this
-  # installer cannot fix "still the old account"; the sub-table must be
-  # removed by hand.
-  if grep -Eq '^[[:space:]]*(\[mcp_servers\.("dharma"|dharma)\]|dharma[[:space:]]*=)' "$stripped"; then
+  ' "$config" > "$stripped" || { rm -f "$stripped"; exit 1; }
+  # A surviving `dharma` definition means the strip missed a spelling, and
+  # appending now would declare the table twice — which makes every Codex app
+  # reject the whole file. The pattern therefore covers each spelling TOML
+  # allows that the awk above doesn't strip: a header with internal whitespace
+  # or single/double quotes, and dotted or quoted keys under [mcp_servers]
+  # (`dharma.command =`, `dharma = {...}`, `'dharma'.command =`). Matching too
+  # much only costs a bail-out; matching too little corrupts the file.
+  #
+  # A [mcp_servers.dharma.env] sub-table is deliberately not matched: it
+  # survives and re-attaches to the fresh block, which is where a hand-set
+  # ASANA_WORKSPACE lives. Note that a stale env.ASANA_TOKEN there outranks the
+  # config file's token, so re-running this installer cannot fix "still the old
+  # account" — that sub-table has to be removed by hand.
+  if grep -Eq "^[[:space:]]*(\[[[:space:]]*mcp_servers[[:space:]]*\.[[:space:]]*[\"']?dharma[\"']?[[:space:]]*\]|[\"']?dharma[\"']?[[:space:]]*[.=])" "$stripped"; then
     rm -f "$stripped"
-    return 1
+    exit 2
   fi
   {
     cat "$stripped"
@@ -136,31 +153,60 @@ register_via_toml() {
     echo "[mcp_servers.dharma]"
     printf 'command = "%s"\n' "$BIN"
     echo 'args = ["mcp"]'
-  } > "$config.new" || { rm -f "$stripped" "$config.new"; return 1; }
+  } > "$config.new" || { rm -f "$stripped" "$config.new"; exit 1; }
   rm -f "$stripped"
-  # config.toml holds other servers' env secrets and codex creates it 0600;
-  # a fresh file from this shell would land 0644 under the default umask.
-  chmod 600 "$config.new" || { rm -f "$config.new"; return 1; }
   mv "$config.new" "$config"
+)
+
+# The guard above returns 2 (rather than 1) when it found a dharma entry it
+# can't safely rewrite: that colleague usually has a *working* registration,
+# so telling them to add the server again would be wrong.
+print_existing_entry_notice() {
+  echo ""
+  echo "Found an existing dharma entry in $codex_config in a format this installer"
+  echo "won't rewrite, so it was left untouched. If dharma already works in ChatGPT"
+  echo "desktop, nothing more is needed — it now points at the updated binary only if"
+  echo "that entry's command is $BIN. Otherwise, edit that entry by hand to:"
+  echo "  command = \"$BIN\""
+  echo "  args    = [\"mcp\"]"
 }
 
 # ChatGPT desktop reads ~/.codex/config.toml; it is not known to honor
 # CODEX_HOME the way the codex CLI does, so this path stays literal — writing
 # elsewhere could register with codex but not with the app this installs for.
 codex_config="$HOME/.codex/config.toml"
-# `codex mcp add` is an idempotent upsert that uses a real TOML parser, so it
-# is tried first and never preceded by a remove — removing first would turn
-# one atomic step into two, and a failed add would leave a colleague who had a
-# working registration with none. If it fails (an older codex has no `mcp`
-# subcommand), fall through to editing the config it shares with ChatGPT
-# desktop; only if that fails too does a non-technical colleague get manual
-# steps.
-if command -v codex >/dev/null 2>&1 && codex mcp add dharma -- "$BIN" mcp; then
+# `codex mcp add` replaces the whole named entry rather than merging into it
+# (verified against codex 0.145.0: a re-add drops env, timeout, and
+# enabled/disabled), so an update run first asks whether the existing entry
+# already points at this binary and leaves it alone if so — that is what keeps
+# a hand-set [mcp_servers.dharma.env] ASANA_WORKSPACE across updates. The add
+# is never preceded by a remove: that would turn one upsert into two steps and
+# leave a colleague with nothing if the add then failed. If codex can't do it
+# (an older codex has no `mcp` subcommand), fall through to editing the config
+# it shares with ChatGPT desktop; only if that fails too does a non-technical
+# colleague get manual steps.
+register_via_codex() {
+  command -v codex >/dev/null 2>&1 || return 1
+  if codex mcp get dharma --json 2>/dev/null | grep -qF "\"$BIN\""; then
+    echo "dharma is already registered with codex mcp at $BIN — leaving its settings alone."
+    return 0
+  fi
+  if codex mcp get dharma >/dev/null 2>&1; then
+    echo "note: replacing an existing codex mcp entry for dharma — any custom env," >&2
+    echo "      timeout, or approval settings on it are reset." >&2
+  fi
+  codex mcp add dharma -- "$BIN" mcp || return 1
   echo "registered dharma with codex mcp."
-elif register_via_toml "$codex_config"; then
-  echo "registered dharma in $codex_config."
-else
-  print_manual_mcp_instructions
+}
+
+if ! register_via_codex; then
+  register_status=0
+  register_via_toml "$codex_config" || register_status=$?
+  case "$register_status" in
+    0) echo "registered dharma in $codex_config." ;;
+    2) print_existing_entry_notice ;;
+    *) print_manual_mcp_instructions ;;
+  esac
 fi
 
 # --- 5. Finish -----------------------------------------------------------

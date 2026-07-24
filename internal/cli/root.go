@@ -65,7 +65,11 @@ func (e *AuthError) Error() string { return e.msg }
 func init() {
 	rootCmd.PersistentFlags().StringVar(&flagToken, "token", "", "Asana PAT (env: ASANA_TOKEN)")
 	rootCmd.PersistentFlags().StringVar(&flagWorkspace, "workspace", "", "workspace gid (env: ASANA_WORKSPACE)")
-	rootCmd.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "log HTTP requests to stderr")
+	rootCmd.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "v", false, "log HTTP requests to stderr")
+	// Registering --version here keeps cobra's InitDefaultVersionFlag from
+	// adding its own with a -v shorthand, which would quietly take -v away
+	// from --verbose. Execute reads this flag by name, so --version still works.
+	rootCmd.Flags().Bool("version", false, "print the dharma version")
 	rootCmd.PersistentFlags().StringVar(&flagOutput, "output", "json", "output format: json or toon (experimental)")
 
 	rootCmd.AddCommand(authCmd, apiCmd, userCmd, taskCmd, myTasksCmd, projectCmd, sectionCmd, tagCmd, workspaceCmd, attachmentCmd, mcpCmd)

@@ -136,6 +136,35 @@ func TestToolContract(t *testing.T) {
 	})
 }
 
+// TestCleanDisconnect pins what a host sees when it quits: stdin closes, the
+// process exits 0, and stdout carried nothing but JSON-RPC. Without it, an SDK
+// change to how a shutdown mid-write is reported would silently bring back
+// "server exited with status 1" (and, before that, an error envelope written
+// onto the JSON-RPC stream) with every test still green.
+func TestCleanDisconnect(t *testing.T) {
+	cmd := exec.Command(buildDharmaForTest(t), "mcp")
+	cmd.Stdin = strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}` + "\n" +
+			`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n")
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("`dharma mcp` exited %v on a normal disconnect, want 0\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var msg struct {
+			JSONRPC string `json:"jsonrpc"`
+		}
+		if err := json.Unmarshal([]byte(line), &msg); err != nil || msg.JSONRPC != "2.0" {
+			t.Errorf("non-JSON-RPC line on stdout, which is the transport: %q", line)
+		}
+	}
+}
+
 // TestArgvBuilders calls each handler against a stub binary and asserts the
 // argv it built, tool by tool. The subprocess boundary is the port's real
 // surface: every tool is one argv construction, and none of the mutating ones
@@ -232,6 +261,25 @@ func TestArgvBuilders(t *testing.T) {
 		})
 	}
 
+	// The stub accepts anything, so the argv assertions above are only as good
+	// as the flags existing in internal/cli. Replay each one against the real
+	// binary (no token, empty config: it fails on auth, never on parsing) and
+	// require that it got past flag parsing.
+	t.Run("every argv parses against the real CLI", func(t *testing.T) {
+		bin := buildDharmaForTest(t)
+		emptyConfig := t.TempDir()
+		for _, tc := range tests {
+			cmd := exec.Command(bin, tc.want...)
+			cmd.Env = append(filterEnv("ASANA_TOKEN", "ASANA_WORKSPACE", "XDG_CONFIG_HOME"), "XDG_CONFIG_HOME="+emptyConfig)
+			out, _ := cmd.CombinedOutput()
+			for _, bad := range []string{"unknown flag", "unknown shorthand flag", "unknown command", "flag needs an argument"} {
+				if strings.Contains(string(out), bad) {
+					t.Errorf("%s: `dharma %s` -> %s\n%s", tc.name, strings.Join(tc.want, " "), bad, out)
+				}
+			}
+		}
+	})
+
 	t.Run("set_due_date rejects neither due nor clear", func(t *testing.T) {
 		if _, _, err := s.setDueDate(ctx, nil, setDueDateArgs{TaskGID: "7"}); err == nil {
 			t.Error("want an error when neither due nor clear is given")
@@ -248,10 +296,10 @@ func TestWorkspaceResolution(t *testing.T) {
 
 	t.Run("single workspace resolves and is passed to the subprocess", func(t *testing.T) {
 		s := freshInstall(t, `{"ok":true,"count":1,"data":[{"gid":"111","name":"80k"}]}`, 0)
-		res := mustNotHang(t, func() (*mcp.CallToolResult, error) {
-			r, _, err := s.myTasks(ctx, nil, myTasksArgs{})
-			return r, err
-		})
+		res, err := callMyTasks(t, ctx, s)
+		if err != nil {
+			t.Fatalf("call failed: %v", err)
+		}
 		if got := stubEnvWorkspace(t, res); got != "111" {
 			t.Errorf("subprocess ASANA_WORKSPACE = %q, want 111", got)
 		}
@@ -260,9 +308,30 @@ func TestWorkspaceResolution(t *testing.T) {
 		}
 	})
 
+	// The second call takes the cached branch, which a naive "revalidate the
+	// cache under the lock" refactor could deadlock exactly like the first one
+	// used to.
+	t.Run("second call reuses the cache without re-listing", func(t *testing.T) {
+		s := freshInstall(t, `{"ok":true,"count":1,"data":[{"gid":"111","name":"80k"}]}`, 0)
+		countFile := filepath.Join(t.TempDir(), "workspace-list-calls")
+		t.Setenv("STUB_CALL_LOG", countFile)
+		for i := 1; i <= 2; i++ {
+			res, err := callMyTasks(t, ctx, s)
+			if err != nil {
+				t.Fatalf("call %d failed: %v", i, err)
+			}
+			if got := stubEnvWorkspace(t, res); got != "111" {
+				t.Errorf("call %d: subprocess ASANA_WORKSPACE = %q, want 111", i, got)
+			}
+		}
+		if n := strings.Count(readStubLog(t, countFile), "workspace list\n"); n != 1 {
+			t.Errorf("`workspace list` ran %d times, want 1 (the gid should be cached)", n)
+		}
+	})
+
 	t.Run("multiple workspaces produce the instructive error", func(t *testing.T) {
 		s := freshInstall(t, `{"ok":true,"count":2,"data":[{"gid":"111","name":"80k"},{"gid":"222","name":"Side"}]}`, 0)
-		_, _, err := s.myTasks(ctx, nil, myTasksArgs{})
+		_, err := callMyTasks(t, ctx, s)
 		if err == nil {
 			t.Fatal("want an error naming both workspaces")
 		}
@@ -276,7 +345,7 @@ func TestWorkspaceResolution(t *testing.T) {
 	t.Run("non-numeric default_workspace is ignored and explained", func(t *testing.T) {
 		s := freshInstall(t, `{"ok":true,"count":2,"data":[{"gid":"111","name":"80k"},{"gid":"222","name":"Side"}]}`, 0)
 		writeConfig(t, `{"token":"x","default_workspace":"80,000 Hours"}`)
-		_, _, err := s.myTasks(ctx, nil, myTasksArgs{})
+		_, err := callMyTasks(t, ctx, s)
 		if err == nil {
 			t.Fatal("want the multi-workspace error, not a call with a workspace name")
 		}
@@ -294,9 +363,22 @@ func TestWorkspaceResolution(t *testing.T) {
 		}
 	})
 
+	t.Run("a failed listing keeps the CLI's structured envelope", func(t *testing.T) {
+		s := freshInstall(t, `{"ok":false,"error":{"message":"Not Authorized","http_status":401,"help":"run dharma auth login"}}`, 1)
+		_, err := callMyTasks(t, ctx, s)
+		if err == nil {
+			t.Fatal("want an error")
+		}
+		for _, want := range []string{"http_status", "401", "Not Authorized"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q dropped %q from dharma's envelope", err, want)
+			}
+		}
+	})
+
 	t.Run("failed listing is reported and not cached", func(t *testing.T) {
 		s := freshInstall(t, "boom", 1)
-		if _, _, err := s.myTasks(ctx, nil, myTasksArgs{}); err == nil || !strings.Contains(err.Error(), "could not list workspaces") {
+		if _, err := callMyTasks(t, ctx, s); err == nil || !strings.Contains(err.Error(), "could not list workspaces") {
 			t.Fatalf("err = %v, want a 'could not list workspaces' error", err)
 		}
 		if s.workspaceGID != "" {
@@ -304,9 +386,16 @@ func TestWorkspaceResolution(t *testing.T) {
 		}
 	})
 
+	t.Run("a token that sees no workspaces is told so", func(t *testing.T) {
+		s := freshInstall(t, `{"ok":true,"count":0,"data":[]}`, 0)
+		if _, err := callMyTasks(t, ctx, s); err == nil || !strings.Contains(err.Error(), "no Asana workspaces visible") {
+			t.Fatalf("err = %v, want the no-workspaces message", err)
+		}
+	})
+
 	t.Run("unparseable listing is reported", func(t *testing.T) {
 		s := freshInstall(t, `not json`, 0)
-		if _, _, err := s.myTasks(ctx, nil, myTasksArgs{}); err == nil || !strings.Contains(err.Error(), "could not parse workspace list") {
+		if _, err := callMyTasks(t, ctx, s); err == nil || !strings.Contains(err.Error(), "could not parse workspace list") {
 			t.Fatalf("err = %v, want a parse error", err)
 		}
 	})
@@ -366,31 +455,73 @@ func TestAsResult(t *testing.T) {
 	}
 }
 
-// TestOutputCap covers the bound that replaces the Node shim's 32MB maxBuffer:
-// a runaway command must fail with a short, actionable message rather than
-// hand a truncated (unparseable) payload to the model.
+// TestOutputCap covers the bound that replaces the Node shim's 32MB
+// maxBuffer, through the real exec path: a runaway command must fail with a
+// short, actionable message rather than hand the model a truncated payload.
 func TestOutputCap(t *testing.T) {
-	var b limitedBuffer
-	chunk := make([]byte, 1<<20)
-	var lastErr error
-	for i := 0; i < (maxOutputBytes>>20)+1; i++ {
-		if _, err := b.Write(chunk); err != nil {
-			lastErr = err
+	t.Run("buffer stops at the cap", func(t *testing.T) {
+		withCap(t, 4096)
+		var b limitedBuffer
+		var lastErr error
+		for i := 0; i < 5; i++ {
+			if _, err := b.Write(make([]byte, 1024)); err != nil {
+				lastErr = err
+			}
 		}
-	}
-	if lastErr == nil {
-		t.Fatal("writing past the cap should fail the write, which kills the subprocess")
-	}
-	if !b.exceeded {
-		t.Error("exceeded not set")
-	}
-	if b.buf.Len() != maxOutputBytes {
-		t.Errorf("captured %d bytes, want the cap %d", b.buf.Len(), maxOutputBytes)
-	}
+		if lastErr == nil {
+			t.Fatal("writing past the cap should fail the write, which kills the subprocess")
+		}
+		if !b.exceeded || b.buf.Len() != maxOutputBytes {
+			t.Errorf("captured %d bytes (exceeded=%v), want the cap %d", b.buf.Len(), b.exceeded, maxOutputBytes)
+		}
+	})
 
-	res := asResult(dharmaResult{ok: false, errMsg: errOutputTooLarge.Error()})
-	if !res.IsError || !strings.Contains(textOf(res), "exceeded 32MB") {
-		t.Errorf("capped result = %q (isError %v), want the cap message", textOf(res), res.IsError)
+	// A child that blows the cap and then keeps running must not hold the tool
+	// call open: os/exec closes the pipe, and WaitDelay kills what's left.
+	t.Run("a runaway command is capped and reported", func(t *testing.T) {
+		withCap(t, 4096)
+		s := &server{binPath: writeFloodStub(t)}
+		t.Setenv("ASANA_WORKSPACE", "999")
+		done := make(chan dharmaResult, 1)
+		go func() { done <- s.runDharma(context.Background(), noWorkspace, "flood") }()
+		select {
+		case res := <-done:
+			if res.ok {
+				t.Fatal("a capped call must not report success")
+			}
+			if !strings.Contains(res.errMsg, "exceeded the") {
+				t.Errorf("errMsg = %q, want the cap message", res.errMsg)
+			}
+			if res.stdout != "" {
+				t.Errorf("truncated payload should be discarded, got %d bytes", len(res.stdout))
+			}
+			if text := textOf(asResult(res)); !strings.Contains(text, "narrow the request") {
+				t.Errorf("tool result = %q, want the actionable cap message", text)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("runDharma never returned — a capped child was not stopped")
+		}
+	})
+}
+
+// TestStderrCaveatReachesTheModel pins the acceptance criterion that
+// success-path caveats (truncation and pagination warnings, which dharma
+// writes to stderr) are surfaced into the tool result — end to end through the
+// subprocess, not just through a hand-built struct.
+func TestStderrCaveatReachesTheModel(t *testing.T) {
+	s := &server{binPath: writeStub(t)}
+	t.Setenv("ASANA_WORKSPACE", "999")
+	t.Setenv("STUB_STDERR", "results truncated")
+	res, _, err := s.whoami(context.Background(), nil, whoamiArgs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := textOf(res)
+	if !strings.Contains(text, "[dharma warning] results truncated") {
+		t.Errorf("tool result = %q, want the stderr caveat appended", text)
+	}
+	if !strings.Contains(text, "user") {
+		t.Errorf("tool result = %q, want stdout too — stderr must not replace it", text)
 	}
 }
 
@@ -432,10 +563,12 @@ func writeStub(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "dharma-stub")
 	script := `#!/bin/sh
+if [ -n "${STUB_CALL_LOG:-}" ]; then printf '%s\n' "$*" >> "$STUB_CALL_LOG"; fi
 if [ "$1" = "workspace" ] && [ "$2" = "list" ]; then
   printf '%s' "$STUB_WORKSPACE_JSON"
   exit "${STUB_WORKSPACE_EXIT:-0}"
 fi
+if [ -n "${STUB_STDERR:-}" ]; then printf '%s\n' "$STUB_STDERR" >&2; fi
 printf 'ASANA_WORKSPACE=%s\n' "${ASANA_WORKSPACE:-}"
 for arg in "$@"; do printf '%s\n' "$arg"; done
 `
@@ -443,6 +576,44 @@ for arg in "$@"; do printf '%s\n' "$arg"; done
 		t.Fatal(err)
 	}
 	return path
+}
+
+// withCap lowers the output cap for one test, so the exec path can be
+// exercised without moving 32MB through a pipe.
+func withCap(t *testing.T, n int) {
+	t.Helper()
+	old := maxOutputBytes
+	maxOutputBytes = n
+	t.Cleanup(func() { maxOutputBytes = old })
+}
+
+// writeFloodStub creates a stand-in that blows past the cap in a single write
+// (small enough to fit the pipe buffer, so it never blocks), then closes
+// stdout and keeps running. That is the shape SIGPIPE cannot stop: with no
+// further writes the child never notices the closed pipe, so only the caller
+// killing it ends the tool call.
+func writeFloodStub(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "dharma-flood")
+	script := `#!/bin/sh
+printf '%8192d' 0
+exec 1>&-
+sleep 30
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// readStubLog returns what the stub recorded in STUB_CALL_LOG.
+func readStubLog(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading stub call log: %v", err)
+	}
+	return string(b)
 }
 
 // stubArgv reads back the argv the stub echoed.
@@ -464,10 +635,22 @@ func stubEnvWorkspace(t *testing.T, res *mcp.CallToolResult) string {
 	return strings.TrimPrefix(first, "ASANA_WORKSPACE=")
 }
 
+// callMyTasks runs a workspace-scoped handler through the hang guard. Every
+// workspace-resolution assertion goes through it, so a re-entrant lock
+// reintroduced on *any* path (first call or cached) fails one subtest instead
+// of wedging the package until the test binary times out.
+func callMyTasks(t *testing.T, ctx context.Context, s *server) (*mcp.CallToolResult, error) {
+	t.Helper()
+	return mustNotHang(t, func() (*mcp.CallToolResult, error) {
+		res, _, err := s.myTasks(ctx, nil, myTasksArgs{})
+		return res, err
+	})
+}
+
 // mustNotHang fails loudly instead of blocking forever, so a re-entrant lock
 // in workspace resolution shows up as a test failure rather than a timeout on
 // the whole package.
-func mustNotHang(t *testing.T, call func() (*mcp.CallToolResult, error)) *mcp.CallToolResult {
+func mustNotHang(t *testing.T, call func() (*mcp.CallToolResult, error)) (*mcp.CallToolResult, error) {
 	t.Helper()
 	type outcome struct {
 		res *mcp.CallToolResult
@@ -480,13 +663,10 @@ func mustNotHang(t *testing.T, call func() (*mcp.CallToolResult, error)) *mcp.Ca
 	}()
 	select {
 	case got := <-done:
-		if got.err != nil {
-			t.Fatalf("call failed: %v", got.err)
-		}
-		return got.res
+		return got.res, got.err
 	case <-time.After(30 * time.Second):
 		t.Fatal("call never returned — workspace resolution deadlocked")
-		return nil
+		return nil, nil
 	}
 }
 

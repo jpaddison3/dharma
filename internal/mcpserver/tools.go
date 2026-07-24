@@ -85,13 +85,18 @@ func (s *server) registerTools(mcpServer *mcp.Server) error {
 	return nil
 }
 
-// httpMethods is the method allowlist, matching index.js:355's zod enum and
-// internal/cli/api.go's own validation.
+// httpMethods is the method allowlist, matching index.js:355's zod enum. It is
+// the only allowlist in the stack: `dharma api -X` upper-cases whatever it is
+// given and only branches on GET/DELETE/HEAD for body handling, so an unknown
+// method reaches Asana with -f entries silently reclassified as body fields.
+// Removing this enum removes the check entirely.
 var httpMethods = []any{"GET", "POST", "PUT", "PATCH", "DELETE"}
 
-// asanaAPISchema is the inferred asanaAPIArgs schema with the two things a
-// Go struct tag can't express restored, so this tool's advertised schema
-// matches index.js:355-357 like the other eleven do:
+// asanaAPISchema is the inferred asanaAPIArgs schema with the two things a Go
+// struct tag can't express restored, so this tool constrains input the way
+// index.js:355-357 does. (Its `method` description is deliberately wordier
+// than Node's bare "HTTP method" — it names the allowed values for hosts that
+// don't surface enums; everything else across the 12 tools is verbatim.)
 //
 //   - method's enum and default. The `jsonschema` tag only ever sets a
 //     description (jsonschema-go infer.go), so without this the model can send

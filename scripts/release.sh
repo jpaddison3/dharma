@@ -32,7 +32,21 @@ if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$COMMIT" "origin/main" 2>/dev
   echo "       (run 'git fetch origin' if origin/main is stale)" >&2
   exit 1
 fi
+# --target only decides where a *missing* tag is created; an existing
+# v$VERSION keeps pointing wherever it already does, so this build would be
+# published under another commit's tag and generated notes.
+EXISTING_TAG="$(git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/v$VERSION" || true)"
+if [ -n "$EXISTING_TAG" ] && [ "$EXISTING_TAG" != "$COMMIT" ]; then
+  echo "error: tag v$VERSION already exists at ${EXISTING_TAG:0:7}, not HEAD (${COMMIT:0:7})" >&2
+  echo "       delete or move the tag, or pick a new version" >&2
+  exit 1
+fi
 gh auth status
+
+# The suite is the only gate on the artifact colleagues install, so run it
+# here rather than trusting that someone ran it.
+echo "running tests..."
+go -C "$REPO_ROOT" test ./...
 
 RELEASE_DIR="$REPO_ROOT/dist/release"
 mkdir -p "$RELEASE_DIR"
