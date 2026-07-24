@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -15,9 +14,12 @@ import (
 
 // Smoke test mirroring mcpb/smoke.mjs: spawns the real dharma binary over
 // stdio (as ChatGPT desktop / Codex would) and exercises it through the SDK
-// client. Requires a live Asana token, so it's opt-in:
+// client against the live API. Requires a live Asana token, so it's opt-in:
 //
 //	ASANA_TOKEN=... go test ./internal/mcpserver/ -run Smoke -v
+//
+// Everything that needs no token lives in TestToolContract below, which runs
+// by default — see its comment.
 func TestSmoke(t *testing.T) {
 	if os.Getenv("ASANA_TOKEN") == "" {
 		t.Skip("ASANA_TOKEN not set; skipping live MCP smoke test")
@@ -26,27 +28,6 @@ func TestSmoke(t *testing.T) {
 	bin := buildDharmaForTest(t)
 	ctx := context.Background()
 	session := connectSmoke(t, ctx, bin, nil)
-
-	t.Run("list tools", func(t *testing.T) {
-		res, err := session.ListTools(ctx, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got := make([]string, len(res.Tools))
-		for i, tool := range res.Tools {
-			got[i] = tool.Name
-		}
-		slices.Sort(got)
-		want := []string{
-			"asana_api", "comment_task", "complete_task", "create_task", "get_task",
-			"list_project_tasks", "list_projects", "my_tasks", "search_tasks",
-			"set_due_date", "task_stories", "whoami",
-		}
-		slices.Sort(want)
-		if !slices.Equal(got, want) {
-			t.Errorf("tools = %v, want %v", got, want)
-		}
-	})
 
 	t.Run("whoami", func(t *testing.T) {
 		res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "whoami", Arguments: map[string]any{}})
@@ -102,40 +83,6 @@ func TestSmoke(t *testing.T) {
 		}
 	})
 
-	t.Run("set_due_date both due and clear", func(t *testing.T) {
-		res, err := session.CallTool(ctx, &mcp.CallToolParams{
-			Name:      "set_due_date",
-			Arguments: map[string]any{"task_gid": "1", "due": "today", "clear": true},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !res.IsError {
-			t.Fatal("set_due_date with both due and clear: want isError")
-		}
-		text := textOf(res)
-		if !strings.Contains(text, "provide either due or clear") {
-			t.Errorf("set_due_date error text = %q, want the either/or message", text)
-		}
-	})
-
-	t.Run("missing token", func(t *testing.T) {
-		emptyConfigDir := t.TempDir()
-		noTokenSession := connectSmoke(t, ctx, bin, func(cmd *exec.Cmd) {
-			cmd.Env = append(filterEnv("ASANA_TOKEN", "XDG_CONFIG_HOME"), "XDG_CONFIG_HOME="+emptyConfigDir)
-		})
-		res, err := noTokenSession.CallTool(ctx, &mcp.CallToolParams{Name: "whoami", Arguments: map[string]any{}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !res.IsError {
-			t.Fatal("whoami with no token: want isError")
-		}
-		text := textOf(res)
-		if !strings.Contains(text, "dharma auth login") {
-			t.Errorf("missing-token error text = %q, want it to mention `dharma auth login`", text)
-		}
-	})
 }
 
 // buildDharmaForTest builds the real dharma binary (not a mock) into a temp

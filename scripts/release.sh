@@ -8,13 +8,28 @@
 #   ./scripts/release.sh <version>   (e.g. 0.2.0)
 set -euo pipefail
 
+REPO="jpaddison3/dharma"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$REPO_ROOT/scripts/lib.sh"
 
 VERSION="${1:?usage: scripts/release.sh <version>  (e.g. 0.2.0)}"
 
+# Everything below binds the release to *this* commit: colleagues' installers
+# fetch whatever the latest release holds, so a tag pointing somewhere other
+# than the built code is a provenance bug they can't see.
 if [ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]; then
   echo "error: working tree not clean — commit or stash first" >&2
+  exit 1
+fi
+BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)"
+if [ "$BRANCH" != "main" ]; then
+  echo "error: on branch '$BRANCH' — releases are cut from main" >&2
+  exit 1
+fi
+COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$COMMIT" "origin/main" 2>/dev/null; then
+  echo "error: HEAD ($(git -C "$REPO_ROOT" rev-parse --short HEAD)) isn't on origin/main — push first" >&2
+  echo "       (run 'git fetch origin' if origin/main is stale)" >&2
   exit 1
 fi
 gh auth status
@@ -32,7 +47,11 @@ rm "$RELEASE_DIR/dharma-arm64" "$RELEASE_DIR/dharma-amd64"
 ASSET="$REPO_ROOT/dist/dharma-macos-universal.tar.gz"
 tar -czf "$ASSET" -C "$RELEASE_DIR" dharma
 
-echo "creating GitHub release v$VERSION..."
-gh release create "v$VERSION" "$ASSET" --title "dharma v$VERSION" --generate-notes
+# --repo and --target pin the release to this repository and this commit; gh
+# would otherwise infer the repo from the caller's directory and tag the
+# remote default branch's HEAD, which may not be what was just built.
+echo "creating GitHub release v$VERSION on $REPO @ ${COMMIT:0:7}..."
+gh release create "v$VERSION" "$ASSET" \
+  --repo "$REPO" --target "$COMMIT" --title "dharma v$VERSION" --generate-notes
 
 echo "done: v$VERSION published with $(basename "$ASSET")"

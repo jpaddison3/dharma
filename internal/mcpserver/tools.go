@@ -2,9 +2,11 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -13,7 +15,7 @@ import (
 // jsonschema tags), and argv builders. Argv builders place "--" before
 // model-supplied positionals so a value starting with "-" can't be parsed as
 // a flag.
-func (s *server) registerTools(mcpServer *mcp.Server) {
+func (s *server) registerTools(mcpServer *mcp.Server) error {
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name:        "whoami",
 		Description: "Get the authenticated Asana user (gid, name, email). Useful as a connectivity check.",
@@ -69,18 +71,58 @@ func (s *server) registerTools(mcpServer *mcp.Server) {
 		Description: "Set or clear a task's due date.",
 	}, s.setDueDate)
 
+	apiSchema, err := asanaAPISchema()
+	if err != nil {
+		return err
+	}
 	mcp.AddTool(mcpServer, &mcp.Tool{
 		Name: "asana_api",
 		Description: "Raw Asana API passthrough for anything the other tools don't cover (modeled on `gh api`). " +
 			"field entries like key=value become query parameters on GET/DELETE and JSON body fields " +
 			"(wrapped in Asana's {data: ...} envelope) on POST/PUT/PATCH.",
+		InputSchema: apiSchema,
 	}, s.asanaAPI)
+	return nil
+}
+
+// httpMethods is the method allowlist, matching index.js:355's zod enum and
+// internal/cli/api.go's own validation.
+var httpMethods = []any{"GET", "POST", "PUT", "PATCH", "DELETE"}
+
+// asanaAPISchema is the inferred asanaAPIArgs schema with the two things a
+// Go struct tag can't express restored, so this tool's advertised schema
+// matches index.js:355-357 like the other eleven do:
+//
+//   - method's enum and default. The `jsonschema` tag only ever sets a
+//     description (jsonschema-go infer.go), so without this the model can send
+//     "FETCH", pass validation, and have the CLI silently reclassify -f
+//     entries from query params to body fields.
+//   - field's description, which begins with "key=value" — a leading WORD= is
+//     reserved tag syntax and fails inference outright.
+func asanaAPISchema() (*jsonschema.Schema, error) {
+	schema, err := jsonschema.For[asanaAPIArgs](nil)
+	if err != nil {
+		return nil, fmt.Errorf("inferring asana_api schema: %w", err)
+	}
+	method, ok := schema.Properties["method"]
+	if !ok {
+		return nil, errors.New("inferring asana_api schema: no method property")
+	}
+	method.Enum = httpMethods
+	method.Default = json.RawMessage(`"GET"`)
+
+	field, ok := schema.Properties["field"]
+	if !ok {
+		return nil, errors.New("inferring asana_api schema: no field property")
+	}
+	field.Description = "key=value pairs (query params on GET/DELETE, body fields otherwise)"
+	return schema, nil
 }
 
 type whoamiArgs struct{}
 
 func (s *server) whoami(ctx context.Context, req *mcp.CallToolRequest, in whoamiArgs) (*mcp.CallToolResult, any, error) {
-	return asResult(s.runDharma(ctx, "user", "me")), nil, nil
+	return asResult(s.runDharma(ctx, noWorkspace, "user", "me")), nil, nil
 }
 
 type myTasksArgs struct {
@@ -91,7 +133,8 @@ type myTasksArgs struct {
 }
 
 func (s *server) myTasks(ctx context.Context, req *mcp.CallToolRequest, in myTasksArgs) (*mcp.CallToolResult, any, error) {
-	if err := s.ensureWorkspace(ctx); err != nil {
+	ws, err := s.resolveWorkspace(ctx)
+	if err != nil {
 		return nil, nil, err
 	}
 	argv := []string{"my-tasks", "list"}
@@ -109,7 +152,7 @@ func (s *server) myTasks(ctx context.Context, req *mcp.CallToolRequest, in myTas
 	if in.Fields != "" {
 		argv = append(argv, "--fields", in.Fields)
 	}
-	return asResult(s.runDharma(ctx, argv...)), nil, nil
+	return asResult(s.runDharma(ctx, ws, argv...)), nil, nil
 }
 
 type searchTasksArgs struct {
@@ -121,7 +164,8 @@ type searchTasksArgs struct {
 }
 
 func (s *server) searchTasks(ctx context.Context, req *mcp.CallToolRequest, in searchTasksArgs) (*mcp.CallToolResult, any, error) {
-	if err := s.ensureWorkspace(ctx); err != nil {
+	ws, err := s.resolveWorkspace(ctx)
+	if err != nil {
 		return nil, nil, err
 	}
 	argv := []string{"task", "search"}
@@ -140,7 +184,7 @@ func (s *server) searchTasks(ctx context.Context, req *mcp.CallToolRequest, in s
 	if in.Fields != "" {
 		argv = append(argv, "--fields", in.Fields)
 	}
-	return asResult(s.runDharma(ctx, argv...)), nil, nil
+	return asResult(s.runDharma(ctx, ws, argv...)), nil, nil
 }
 
 type getTaskArgs struct {
@@ -158,7 +202,7 @@ func (s *server) getTask(ctx context.Context, req *mcp.CallToolRequest, in getTa
 		argv = append(argv, "--full")
 	}
 	argv = append(argv, "--", in.TaskGID)
-	return asResult(s.runDharma(ctx, argv...)), nil, nil
+	return asResult(s.runDharma(ctx, noWorkspace, argv...)), nil, nil
 }
 
 type taskStoriesArgs struct {
@@ -176,7 +220,7 @@ func (s *server) taskStories(ctx context.Context, req *mcp.CallToolRequest, in t
 		argv = append(argv, "--full")
 	}
 	argv = append(argv, "--", in.TaskGID)
-	return asResult(s.runDharma(ctx, argv...)), nil, nil
+	return asResult(s.runDharma(ctx, noWorkspace, argv...)), nil, nil
 }
 
 type listProjectsArgs struct {
@@ -184,14 +228,15 @@ type listProjectsArgs struct {
 }
 
 func (s *server) listProjects(ctx context.Context, req *mcp.CallToolRequest, in listProjectsArgs) (*mcp.CallToolResult, any, error) {
-	if err := s.ensureWorkspace(ctx); err != nil {
+	ws, err := s.resolveWorkspace(ctx)
+	if err != nil {
 		return nil, nil, err
 	}
 	argv := []string{"project", "list"}
 	if in.Paginate {
 		argv = append(argv, "--paginate")
 	}
-	return asResult(s.runDharma(ctx, argv...)), nil, nil
+	return asResult(s.runDharma(ctx, ws, argv...)), nil, nil
 }
 
 type listProjectTasksArgs struct {
@@ -212,7 +257,7 @@ func (s *server) listProjectTasks(ctx context.Context, req *mcp.CallToolRequest,
 	if in.Fields != "" {
 		argv = append(argv, "--fields", in.Fields)
 	}
-	return asResult(s.runDharma(ctx, argv...)), nil, nil
+	return asResult(s.runDharma(ctx, noWorkspace, argv...)), nil, nil
 }
 
 type createTaskArgs struct {
@@ -225,8 +270,10 @@ type createTaskArgs struct {
 func (s *server) createTask(ctx context.Context, req *mcp.CallToolRequest, in createTaskArgs) (*mcp.CallToolResult, any, error) {
 	// A project-backed create infers its workspace from the project; only
 	// workspace-level creates need resolution.
+	ws := noWorkspace
 	if in.ProjectGID == "" {
-		if err := s.ensureWorkspace(ctx); err != nil {
+		var err error
+		if ws, err = s.resolveWorkspace(ctx); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -244,7 +291,7 @@ func (s *server) createTask(ctx context.Context, req *mcp.CallToolRequest, in cr
 		// Tasks (and be findable only via search); default to the user.
 		argv = append(argv, "--assignee", "me")
 	}
-	return asResult(s.runDharma(ctx, argv...)), nil, nil
+	return asResult(s.runDharma(ctx, ws, argv...)), nil, nil
 }
 
 type commentTaskArgs struct {
@@ -253,7 +300,7 @@ type commentTaskArgs struct {
 }
 
 func (s *server) commentTask(ctx context.Context, req *mcp.CallToolRequest, in commentTaskArgs) (*mcp.CallToolResult, any, error) {
-	return asResult(s.runDharma(ctx, "task", "comment", "--text", in.Text, "--", in.TaskGID)), nil, nil
+	return asResult(s.runDharma(ctx, noWorkspace, "task", "comment", "--text", in.Text, "--", in.TaskGID)), nil, nil
 }
 
 type completeTaskArgs struct {
@@ -261,7 +308,7 @@ type completeTaskArgs struct {
 }
 
 func (s *server) completeTask(ctx context.Context, req *mcp.CallToolRequest, in completeTaskArgs) (*mcp.CallToolResult, any, error) {
-	return asResult(s.runDharma(ctx, "task", "complete", "--", in.TaskGID)), nil, nil
+	return asResult(s.runDharma(ctx, noWorkspace, "task", "complete", "--", in.TaskGID)), nil, nil
 }
 
 type setDueDateArgs struct {
@@ -284,13 +331,15 @@ func (s *server) setDueDate(ctx context.Context, req *mcp.CallToolRequest, in se
 		return nil, nil, errors.New("provide either due or clear")
 	}
 	argv = append(argv, "--", in.TaskGID)
-	return asResult(s.runDharma(ctx, argv...)), nil, nil
+	return asResult(s.runDharma(ctx, noWorkspace, argv...)), nil, nil
 }
 
 type asanaAPIArgs struct {
-	Method   string   `json:"method,omitempty" jsonschema:"HTTP method: GET, POST, PUT, PATCH, or DELETE (default GET)"`
-	Path     string   `json:"path" jsonschema:"API path, e.g. /users/me or /tasks/123"`
-	Field    []string `json:"field,omitempty" jsonschema:"Repeatable key=value pairs (query params on GET/DELETE, body fields otherwise)"`
+	Method string `json:"method,omitempty" jsonschema:"HTTP method: GET, POST, PUT, PATCH, or DELETE (default GET)"`
+	Path   string `json:"path" jsonschema:"API path, e.g. /users/me or /tasks/123"`
+	// Field's description is set in asanaAPISchema, not here: it begins with
+	// "key=value", and jsonschema-go rejects a struct tag starting with WORD=.
+	Field    []string `json:"field,omitempty"`
 	Body     string   `json:"body,omitempty" jsonschema:"Raw JSON body, passed through unchanged"`
 	Paginate bool     `json:"paginate,omitempty" jsonschema:"Follow all pages (GET only)"`
 }
@@ -311,5 +360,5 @@ func (s *server) asanaAPI(ctx context.Context, req *mcp.CallToolRequest, in asan
 		argv = append(argv, "--paginate")
 	}
 	argv = append(argv, "--", in.Path)
-	return asResult(s.runDharma(ctx, argv...)), nil, nil
+	return asResult(s.runDharma(ctx, noWorkspace, argv...)), nil, nil
 }

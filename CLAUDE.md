@@ -11,6 +11,7 @@ Personal CLI for the Asana API. Goal: replace the flaky Asana MCP server with a 
 - `internal/output/` — JSON output (pretty for TTY, compact when piped)
 - `plugin/` — Claude Cowork plugin (manifest, skill, arch-dispatching `bin/dharma` wrapper); binaries and config are bundled at install time by `scripts/install-cowork-plugin.sh`, never committed
 - `mcpb/` — Claude Desktop extension (MCP shim over the CLI for non-technical colleagues); `scripts/build-mcpb.sh` → `dist/dharma.mcpb`; smoke-test with `ASANA_TOKEN=... node mcpb/smoke.mjs`
+- `internal/mcpserver/` — native Go MCP server over stdio (`dharma mcp`) for ChatGPT desktop / Codex, ported from `mcpb/server/index.js`; published by `scripts/release.sh <version>` and installed by `scripts/install-chatgpt.sh` (the curl one-liner in the README). Token-free tests run on every `go test ./...`; the live smoke test is opt-in: `ASANA_TOKEN=... go test ./internal/mcpserver/ -run Smoke -v`
 
 ## Dev
 
