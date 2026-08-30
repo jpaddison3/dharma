@@ -42,9 +42,45 @@ var tagListCmd = &cobra.Command{
 	},
 }
 
+var (
+	tagCreateName  string
+	tagCreateColor string
+)
+
+var tagCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a tag in a workspace",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		if tagCreateName == "" {
+			return usageErrorf("--name is required")
+		}
+		ctx := context.Background()
+		ws, err := requireWorkspace(ctx, c)
+		if err != nil {
+			return err
+		}
+		body := map[string]interface{}{
+			"name":      tagCreateName,
+			"workspace": ws,
+		}
+		if tagCreateColor != "" {
+			body["color"] = tagCreateColor
+		}
+		return runPost(ctx, c, "/tags", body)
+	},
+}
+
 func init() {
 	tagListCmd.Flags().StringVar(&tagListName, "name", "", "fuzzy match against tag names (uses typeahead; max ~20 results)")
 	tagListCmd.Flags().BoolVar(&tagListPaginate, "paginate", false, "fetch all pages (ignored when --name is set)")
 	addFieldsFlag(tagListCmd, &tagListFields, "name,color")
-	tagCmd.AddCommand(tagListCmd)
+
+	tagCreateCmd.Flags().StringVar(&tagCreateName, "name", "", "tag name (required)")
+	tagCreateCmd.Flags().StringVar(&tagCreateColor, "color", "", "tag color")
+
+	tagCmd.AddCommand(tagListCmd, tagCreateCmd)
 }
