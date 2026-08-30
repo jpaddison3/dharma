@@ -79,7 +79,8 @@ func (s *server) registerTools(mcpServer *mcp.Server) error {
 		Name: "asana_api",
 		Description: "Raw Asana API passthrough for anything the other tools don't cover (modeled on `gh api`). " +
 			"field entries like key=value become query parameters on GET/DELETE and JSON body fields " +
-			"(wrapped in Asana's {data: ...} envelope) on POST/PUT/PATCH.",
+			"(wrapped in Asana's {data: ...} envelope) on POST/PUT/PATCH. html_notes/html_text must be " +
+			"<body>-wrapped; escape only & < >, never numeric character references, and do not use <p> or <br>.",
 		InputSchema: apiSchema,
 	}, s.asanaAPI)
 	return nil

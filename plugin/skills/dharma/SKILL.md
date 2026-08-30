@@ -46,6 +46,9 @@ For endpoints without a typed command, `dharma api` works like `gh api` (`"$DHAR
 "$DHARMA" api -X POST /tasks -f name=Foo -f projects=<gid>
 ```
 
+For rich text via `html_notes` / `html_text`, wrap the value in `<body>`, escape only `& < >`, and use literal UTF-8—not numeric character references. Do not use `<p>` or `<br>`.
+The typed `--notes`, `set-notes`, and `comment` paths are plain text. See `"$DHARMA" api --help` for the authoritative rules, allowed tags, and examples.
+
 ## Conventions
 
 - **Output** is a JSON envelope on stdout (compact when piped):

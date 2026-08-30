@@ -105,6 +105,9 @@ List and `get` commands send a curated `--fields` (opt_fields) set by default â€
 
 `-f key=value` becomes a **query parameter** on GET/DELETE/HEAD and a **JSON body field** (wrapped in Asana's `{"data": ...}` envelope) on POST/PUT/PATCH. `--body` passes raw JSON through unchanged.
 
+For rich text via `html_notes` / `html_text`, wrap the value in `<body>`, escape only `& < >`, and use literal UTF-8â€”not numeric character references. Do not use `<p>` or `<br>`.
+The typed `--notes`, `set-notes`, and `comment` paths are plain text. See `dharma api --help` for the authoritative rules, allowed tags, and examples.
+
 ### Workspace default
 
 Many endpoints need a workspace gid. Resolution order:

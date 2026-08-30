@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -54,6 +55,52 @@ its own line (column 0) and must not appear in the text:
 
 dharma api -X POST /tasks/123/stories -f text=@- <<'DHARMA_EOF'
 It's "quoted" text — no escaping needed.
+DHARMA_EOF
+
+Rich text (html_notes / html_text)
+
+Rich text is available through dharma api; the typed task commands use plain
+text. Follow these rules when sending html_notes or html_text:
+
+  - Wrap the entire value in <body>...</body>. Without it, Asana returns 400
+    "Rich text should be wrapped in <body> tag."
+  - In text, escape < and > as &lt; and &gt;. A bare & is tolerated and
+    auto-escaped, but &amp; is the safe form.
+  - Only the XML five named entities are reliable: &amp; &lt; &gt; &quot;
+    &apos;. Other named entities are inconsistent: &mdash; and &nbsp; decode,
+    but &rarr; is stored literally. Numeric references such as &#x27;, &#39;,
+    and &#8212; are never decoded and appear literally. Write apostrophes,
+    quotes, dashes, arrows, and other characters as literal UTF-8.
+  - Allowed tags are h1 h2 strong em u s code pre blockquote ol ul li a hr
+    table tr td. <a> requires href. Tags p, br, div, and span, plus HTML
+    comments, are rejected in task descriptions. Use literal newlines inside
+    <body> for line breaks.
+  - <a data-asana-gid="GID"/> expands to an @-mention for a user gid or a
+    titled task link for a task gid, in descriptions and comments.
+  - Do not send notes with html_notes, or text with html_text. Asana does not
+    error when both are present; the HTML field silently wins.
+  - Invalid html_notes fails with 400. Invalid html_text on a story can instead
+    return 200 and post the raw markup as visible plain text; check the returned
+    text after posting.
+  - Reading rich text requires explicit fields: task get --fields html_notes,
+    or task stories --fields html_text,created_at. Defaults return plain
+    notes/text.
+  - task create --notes, task set-notes, and task comment are plain text, so
+    markup is shown literally. set-notes replaces the whole description and
+    drops existing formatting.
+
+Write a formatted task description from stdin:
+
+dharma api -X PUT /tasks/123 -f html_notes=@- <<'DHARMA_EOF'
+<body><h1>Plan</h1>
+Use <strong>literal UTF-8</strong>: Luca's → next step.
+Fish &amp; chips.</body>
+DHARMA_EOF
+
+Write a formatted story comment from stdin, then inspect the returned text:
+
+dharma api -X POST /tasks/123/stories -f html_text=@- <<'DHARMA_EOF'
+<body><strong>Status:</strong> ready — see <a href="https://example.com">details</a>.</body>
 DHARMA_EOF`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -92,7 +139,7 @@ DHARMA_EOF`,
 			}
 			rawBody = []byte(resolvedBody)
 		case len(apiFields) > 0:
-			m, q, err := buildAPIFields(apiFields, hasBody)
+			m, q, err := buildAPIFields(apiFields, hasBody, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
@@ -164,7 +211,7 @@ func resolveBody(spec string) (string, error) {
 // query parameters. Both directions live here so a test can assert the
 // security-relevant invariant: '@' expands only when there is a request body,
 // never in a GET/DELETE/HEAD query value.
-func buildAPIFields(fields []string, hasBody bool) (map[string]string, url.Values, error) {
+func buildAPIFields(fields []string, hasBody bool, warnings io.Writer) (map[string]string, url.Values, error) {
 	if hasBody {
 		m := make(map[string]string)
 		for _, f := range fields {
@@ -178,6 +225,7 @@ func buildAPIFields(fields []string, hasBody bool) (map[string]string, url.Value
 			}
 			m[k] = v
 		}
+		warnAPINumericCharacterReferences(m, warnings)
 		return m, nil, nil
 	}
 	query := url.Values{}
@@ -189,6 +237,17 @@ func buildAPIFields(fields []string, hasBody bool) (map[string]string, url.Value
 		query.Add(k, v)
 	}
 	return nil, query, nil
+}
+
+func warnAPINumericCharacterReferences(fields map[string]string, warnings io.Writer) {
+	if warnings == nil {
+		return
+	}
+	for _, key := range []string{"html_notes", "html_text"} {
+		if strings.Contains(fields[key], "&#") {
+			fmt.Fprintf(warnings, "warning: %s contains '&#'; numeric character references are stored literally by Asana — use literal UTF-8 instead\n", key)
+		}
+	}
 }
 
 func init() {

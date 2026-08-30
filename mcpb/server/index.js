@@ -382,7 +382,8 @@ cliTool(
   "asana_api",
   "Raw Asana API passthrough for anything the other tools don't cover (modeled on `gh api`). " +
     "field entries like key=value become query parameters on GET/DELETE and JSON body fields " +
-    "(wrapped in Asana's {data: ...} envelope) on POST/PUT/PATCH.",
+    "(wrapped in Asana's {data: ...} envelope) on POST/PUT/PATCH. html_notes/html_text must be " +
+    "<body>-wrapped; escape only & < >, never numeric character references, and do not use <p> or <br>.",
   {
     method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).default("GET").describe("HTTP method"),
     path: z.string().describe("API path, e.g. /users/me or /tasks/123"),
