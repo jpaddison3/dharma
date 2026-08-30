@@ -270,6 +270,9 @@ var (
 var taskCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a task",
+	Long: `Create a task. --notes is plain text only, so markup is shown literally.
+For a formatted description, use dharma api with html_notes; see
+dharma api --help.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c, err := newClient()
 		if err != nil {
@@ -331,7 +334,9 @@ dharma task comment 1234567890 <<'DHARMA_EOF'
 Comment text goes here — quotes, apostrophes, newlines all fine.
 DHARMA_EOF
 
---text still works for short one-liners.`,
+--text still works for short one-liners. Comment text is plain text only, so
+markup is shown literally. For a formatted comment, use dharma api with
+html_text; see dharma api --help.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		changed := cmd.Flags().Changed("text")
@@ -541,8 +546,11 @@ var taskSetNotesText string
 var taskSetNotesCmd = &cobra.Command{
 	Use:   "set-notes <gid>",
 	Short: "Set a task's description (notes)",
-	Long:  "Set a task's description. Pass --notes \"\" to clear.",
-	Args:  cobra.ExactArgs(1),
+	Long: `Set a task's description. Pass --notes "" to clear. Notes are plain
+text only, so markup is shown literally. This replaces the whole description
+and drops existing formatting. For a formatted description, use dharma api
+with html_notes; see dharma api --help.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !cmd.Flags().Changed("notes") {
 			return usageErrorf("--notes is required (pass \"\" to clear)")
@@ -699,7 +707,7 @@ func init() {
 
 	taskCreateCmd.Flags().StringVar(&taskCreateName, "name", "", "task name (required)")
 	taskCreateCmd.Flags().StringArrayVar(&taskCreateProjects, "project", nil, "project gid (repeatable)")
-	taskCreateCmd.Flags().StringVar(&taskCreateNotes, "notes", "", "task description")
+	taskCreateCmd.Flags().StringVar(&taskCreateNotes, "notes", "", "plain-text task description")
 	taskCreateCmd.Flags().StringVar(&taskCreateAssignee, "assignee", "", "assignee gid")
 
 	taskCommentCmd.Flags().StringVar(&taskCommentText, "text", "", "comment text (default: read from stdin; URLs are auto-linked by Asana)")
@@ -721,7 +729,7 @@ func init() {
 	taskAssignCmd.Flags().StringVar(&taskAssignTo, "to", "", "assignee user gid, or 'me'")
 	taskAssignCmd.Flags().BoolVar(&taskAssignClear, "clear", false, "unassign the task")
 
-	taskSetNotesCmd.Flags().StringVar(&taskSetNotesText, "notes", "", "new description (pass \"\" to clear)")
+	taskSetNotesCmd.Flags().StringVar(&taskSetNotesText, "notes", "", "new plain-text description (pass \"\" to clear)")
 
 	taskSearchCmd.Flags().StringVar(&taskSearchText, "text", "", "match name/description")
 	taskSearchCmd.Flags().StringVar(&taskSearchAssignee, "assignee", "", "user gid or 'me'")
