@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -108,6 +109,46 @@ func TestBuildAPIFieldsWarnsForNumericCharacterReferences(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if got := warnings.String(); got != tt.wantWarn {
+				t.Errorf("warning = %q, want %q", got, tt.wantWarn)
+			}
+		})
+	}
+}
+
+func TestWarnBodyNumericCharacterReferences(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantWarn string
+	}{
+		{
+			name:     "html_notes in envelope",
+			body:     `{"data":{"html_notes":"<body>It&#39;s literal</body>"}}`,
+			wantWarn: "warning: html_notes contains '&#'; numeric character references are stored literally by Asana — use literal UTF-8 instead\n",
+		},
+		{
+			name: "literal UTF-8",
+			body: `{"data":{"html_notes":"<body>It's literal</body>"}}`,
+		},
+		{
+			name: "numeric reference outside rich text fields",
+			body: `{"data":{"notes":"It&#39;s plain text"}}`,
+		},
+		{
+			name: "non-object body",
+			body: `[1, 2]`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var v interface{}
+			if err := json.Unmarshal([]byte(tt.body), &v); err != nil {
+				t.Fatal(err)
+			}
+			var warnings bytes.Buffer
+			warnBodyNumericCharacterReferences(v, &warnings)
 			if got := warnings.String(); got != tt.wantWarn {
 				t.Errorf("warning = %q, want %q", got, tt.wantWarn)
 			}

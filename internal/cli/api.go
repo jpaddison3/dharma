@@ -137,6 +137,7 @@ DHARMA_EOF`,
 			if err := json.Unmarshal([]byte(resolvedBody), &v); err != nil {
 				return usageErrorf("invalid --body JSON: %v", err)
 			}
+			warnBodyNumericCharacterReferences(v, cmd.ErrOrStderr())
 			rawBody = []byte(resolvedBody)
 		case len(apiFields) > 0:
 			m, q, err := buildAPIFields(apiFields, hasBody, cmd.ErrOrStderr())
@@ -248,6 +249,27 @@ func warnAPINumericCharacterReferences(fields map[string]string, warnings io.Wri
 			fmt.Fprintf(warnings, "warning: %s contains '&#'; numeric character references are stored literally by Asana — use literal UTF-8 instead\n", key)
 		}
 	}
+}
+
+// warnBodyNumericCharacterReferences applies the same '&#' advisory to a raw
+// --body payload, looking inside Asana's {"data": ...} envelope for the rich
+// text fields.
+func warnBodyNumericCharacterReferences(body interface{}, warnings io.Writer) {
+	m, ok := body.(map[string]interface{})
+	if !ok {
+		return
+	}
+	data, ok := m["data"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	fields := make(map[string]string)
+	for _, key := range []string{"html_notes", "html_text"} {
+		if s, ok := data[key].(string); ok {
+			fields[key] = s
+		}
+	}
+	warnAPINumericCharacterReferences(fields, warnings)
 }
 
 func init() {
