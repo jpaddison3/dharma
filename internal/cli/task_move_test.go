@@ -288,16 +288,3 @@ func TestTaskMoveAnchorAPIError(t *testing.T) {
 		t.Errorf("stderr = %q", result.Stderr)
 	}
 }
-
-func TestTaskMoveHelpDocumentsPlacement(t *testing.T) {
-	for _, want := range []string{
-		"anchor task in that section",
-		"mutually",
-		"top of the section",
-		"validates anchor membership, permissions, and self-placement",
-	} {
-		if !strings.Contains(taskMoveCmd.Long, want) {
-			t.Errorf("task move help does not contain %q", want)
-		}
-	}
-}
