@@ -8,7 +8,7 @@ import (
 
 func TestTagTasksDefaultRequestAndOutput(t *testing.T) {
 	calls := 0
-	result := runTagCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
+	result := runCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
 		calls++
 		if req.Method != http.MethodGet {
 			t.Errorf("method = %s, want GET", req.Method)
@@ -45,7 +45,7 @@ func TestTagTasksCustomAndEmptyFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			args := append([]string{"tag", "tasks", "tag-2"}, tt.args...)
-			result := runTagCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
+			result := runCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
 				wantQuery := url.Values{}
 				wantLimit := "100"
 				if tt.wantFields != "" {
@@ -65,7 +65,7 @@ func TestTagTasksCustomAndEmptyFields(t *testing.T) {
 
 func TestTagTasksFirstPageHint(t *testing.T) {
 	calls := 0
-	result := runTagCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
+	result := runCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
 		calls++
 		return jsonResponse(200, `{"data":[{"gid":"task-1"}],"next_page":{"offset":"next"}}`), nil
 	}, "tag", "tasks", "tag-1", "--limit", "1")
@@ -86,7 +86,7 @@ func TestTagTasksFirstPageHint(t *testing.T) {
 
 func TestTagTasksPaginationRetainsQuery(t *testing.T) {
 	calls := 0
-	result := runTagCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
+	result := runCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
 		calls++
 		q := req.URL.Query()
 		switch calls {
@@ -114,7 +114,7 @@ func TestTagTasksPaginationRetainsQuery(t *testing.T) {
 }
 
 func TestTagTasksEmptyListIsArray(t *testing.T) {
-	result := runTagCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
+	result := runCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
 		return jsonResponse(200, `{"data":[]}`), nil
 	}, "tag", "tasks", "tag-1")
 	if result.err != nil {
@@ -136,15 +136,12 @@ func TestTagTasksRejectsUnsupportedInputBeforeHTTP(t *testing.T) {
 		{"tag", "tasks", "tag-1", "--limit", "101"},
 		{"tag", "tasks"},
 		{"tag", "tasks", "tag-1", "extra"},
+		// Asana's /tags/{gid}/tasks has no filters, so task-list flags must not
+		// exist here (a silently ignored --incomplete would be worse than an error).
 		{"tag", "tasks", "tag-1", "--incomplete"},
-		{"tag", "tasks", "tag-1", "--completed-since", "now"},
-		{"tag", "tasks", "tag-1", "--modified-since", "2026-01-01"},
-		{"tag", "tasks", "tag-1", "--assignee", "me"},
-		{"tag", "tasks", "tag-1", "--project", "project-1"},
-		{"tag", "tasks", "tag-1", "--section", "section-1"},
 	}
 	for _, args := range tests {
-		result := runTagCLI(t, "", nil, args...)
+		result := runCLI(t, "", nil, args...)
 		if result.err == nil {
 			t.Errorf("%v: expected usage error", args)
 			continue

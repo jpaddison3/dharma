@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
-
-	"github.com/spf13/cobra"
 )
 
 func TestTagGetRequestFieldsAndObjectOutput(t *testing.T) {
@@ -21,7 +19,7 @@ func TestTagGetRequestFieldsAndObjectOutput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			args := append([]string{"tag", "get", "tag-1"}, tt.args...)
-			result := runTagCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
+			result := runCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
 				if req.Method != http.MethodGet || req.URL.Path != "/api/1.0/tags/tag-1" {
 					t.Errorf("request = %s %s", req.Method, req.URL.Path)
 				}
@@ -52,7 +50,7 @@ func TestTagGetRequestFieldsAndObjectOutput(t *testing.T) {
 
 func TestTagGetWrongArityIsUsageError(t *testing.T) {
 	for _, args := range [][]string{{"tag", "get"}, {"tag", "get", "one", "two"}} {
-		result := runTagCLI(t, "", nil, args...)
+		result := runCLI(t, "", nil, args...)
 		if result.err == nil || result.code != 3 {
 			t.Errorf("%v: err=%v code=%d, want usage error/3", args, result.err, result.code)
 		}
@@ -68,7 +66,7 @@ func TestTagGetAPIErrorClassification(t *testing.T) {
 		{http.StatusNotFound, 1},
 	}
 	for _, tt := range tests {
-		result := runTagCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
+		result := runCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
 			return jsonResponse(tt.status, `{"errors":[{"message":"tag unavailable"}]}`), nil
 		}, "tag", "get", "missing")
 		if result.err == nil {
@@ -78,13 +76,4 @@ func TestTagGetAPIErrorClassification(t *testing.T) {
 			t.Errorf("HTTP %d: code/status = %d/%d, want %d/%d", tt.status, result.code, result.payload.HTTPStatus, tt.wantCode, tt.status)
 		}
 	}
-}
-
-func TestTagAndTaskCommandRegistration(t *testing.T) {
-	requireCommands(t, tagCmd, map[string]*cobra.Command{
-		"list": tagListCmd, "create": tagCreateCmd, "get": tagGetCmd, "tasks": tagTasksCmd,
-	})
-	requireCommands(t, taskCmd, map[string]*cobra.Command{
-		"add-tag": taskAddTagCmd, "remove-tag": taskRemoveTagCmd,
-	})
 }

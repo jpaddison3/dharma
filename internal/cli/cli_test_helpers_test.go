@@ -27,11 +27,11 @@ type cliTestResult struct {
 	payload errorPayload
 }
 
-// runTagCLI executes through the registered root command while isolating the
+// runCLI executes through the registered root command while isolating the
 // package globals and Cobra flag state used by these tests. Tests in this file
 // family deliberately run serially because os.Stdout and http.DefaultTransport
 // are process globals.
-func runTagCLI(t *testing.T, token string, transport roundTripFunc, args ...string) cliTestResult {
+func runCLI(t *testing.T, token string, transport roundTripFunc, args ...string) cliTestResult {
 	t.Helper()
 
 	type globals struct {
@@ -160,19 +160,6 @@ func decodeObject(t *testing.T, raw string) map[string]interface{} {
 		t.Fatalf("decoding output %q: %v", raw, err)
 	}
 	return got
-}
-
-func requireCommands(t *testing.T, parent *cobra.Command, wants map[string]*cobra.Command) {
-	t.Helper()
-	got := map[string]*cobra.Command{}
-	for _, cmd := range parent.Commands() {
-		got[cmd.Name()] = cmd
-	}
-	for name, want := range wants {
-		if got[name] != want {
-			t.Errorf("%s %q registration = %p, want %p", parent.Name(), name, got[name], want)
-		}
-	}
 }
 
 func requireJSONEqual(t *testing.T, got interface{}, want interface{}) {

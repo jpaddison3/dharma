@@ -9,7 +9,7 @@ import (
 
 func TestTaskRemoveTagRequestAndOutput(t *testing.T) {
 	calls := 0
-	result := runTagCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
+	result := runCLI(t, "test-token", func(req *http.Request) (*http.Response, error) {
 		calls++
 		if req.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", req.Method)
@@ -60,7 +60,7 @@ func TestTaskRemoveTagRejectsInvalidInputBeforeHTTP(t *testing.T) {
 		{"task", "remove-tag", "task-1", "extra", "--tag", "tag-1"},
 	}
 	for _, args := range tests {
-		result := runTagCLI(t, "", nil, args...)
+		result := runCLI(t, "", nil, args...)
 		if result.err == nil {
 			t.Errorf("%v: expected usage error", args)
 			continue

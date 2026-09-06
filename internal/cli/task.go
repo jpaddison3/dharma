@@ -464,6 +464,26 @@ var taskAddTagCmd = &cobra.Command{
 	},
 }
 
+var taskRemoveTagTag string
+
+var taskRemoveTagCmd = &cobra.Command{
+	Use:     "remove-tag <gid>",
+	Short:   "Remove a tag association from a task",
+	Long:    `Remove a tag association from a task. The tag itself is not deleted.`,
+	Example: `  dharma task remove-tag 1234567890 --tag 9876543210`,
+	Args:    cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if taskRemoveTagTag == "" {
+			return usageErrorf("--tag is required (a tag gid)")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		return runPost(context.Background(), c, "/tasks/"+args[0]+"/removeTag", map[string]interface{}{"tag": taskRemoveTagTag})
+	},
+}
+
 var taskRenameName string
 
 var taskRenameCmd = &cobra.Command{
@@ -789,6 +809,7 @@ func init() {
 	taskRemoveFromProjectCmd.Flags().StringVar(&taskRemoveFromProjectProject, "project", "", "project gid (required)")
 
 	taskAddTagCmd.Flags().StringVar(&taskAddTagTag, "tag", "", "tag gid (required)")
+	taskRemoveTagCmd.Flags().StringVar(&taskRemoveTagTag, "tag", "", "tag gid (required)")
 
 	taskRenameCmd.Flags().StringVar(&taskRenameName, "name", "", "new name (required)")
 
@@ -818,5 +839,5 @@ func init() {
 	taskStoriesCmd.Flags().BoolVar(&taskStoriesPaginate, "paginate", false, "fetch all pages")
 	taskStoriesCmd.Flags().BoolVar(&taskStoriesFull, "full", false, "return full comment text without truncation")
 
-	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRenameCmd, taskCompleteCmd, taskSetDueCmd, taskAssignCmd, taskSetNotesCmd, taskSearchCmd, taskStoriesCmd)
+	taskCmd.AddCommand(taskListCmd, taskGetCmd, taskCreateCmd, taskCommentCmd, taskMoveCmd, taskAddToProjectCmd, taskRemoveFromProjectCmd, taskAddTagCmd, taskRemoveTagCmd, taskRenameCmd, taskCompleteCmd, taskSetDueCmd, taskAssignCmd, taskSetNotesCmd, taskSearchCmd, taskStoriesCmd)
 }
