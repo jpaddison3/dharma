@@ -34,6 +34,10 @@ If `CLAUDE_PLUGIN_ROOT` is unset, the plugin root is two directories above this 
 "$DHARMA" task get <gid> --fields name,notes,assignee.name
 "$DHARMA" task create --name "Do the thing" --project <gid> --assignee me
 "$DHARMA" task create --name "Formatted" --html-notes @description.html
+"$DHARMA" task subtask list <parent-gid> --paginate
+"$DHARMA" task subtask create <parent-gid> --name "Investigate" --assignee me
+"$DHARMA" task subtask create <parent-gid> --name "Formatted child" --html-notes @description.html
+"$DHARMA" task set-parent <task-gid> --parent <parent-gid>   # or: --clear
 # Comment text is read from stdin (quotes/apostrophes/newlines need no
 # escaping). For arbitrary or untrusted text, write it to a file and redirect —
 # no shell escaping, and nothing to collide with a heredoc delimiter:
@@ -53,7 +57,7 @@ Typed task writes accept literal plain text through `--notes`/`--text` or Asana 
 
 Wrap rich text in balanced `<body>...</body>` XML. Use `<body></body>` for an empty formatted description, literal UTF-8 rather than numeric references, and `<a data-asana-gid="GID"/>` for Asana mentions. `task set-notes` replaces the whole description. Supported markup varies by object; see [Asana's rich-text documentation](https://developers.asana.com/docs/rich-text). Observed task descriptions also support tables but reject `p`, `br`, `div`, `span`, and HTML comments. Invalid story HTML may appear as raw text despite HTTP success, so inspect returned `text`. See `"$DHARMA" api --help` for the authoritative CLI rules.
 
-The separate MCP `create_task` and `comment_task` tools remain plain-text-only and treat `@...` literally; use `asana_api` for rich text through MCP.
+The separate MCP `create_task` and `comment_task` tools remain plain-text-only and treat `@...` literally; use `asana_api` for rich text and for subtask/parent operations through MCP. Typed `task subtask list` returns direct children (including completed tasks) and supports `--fields`, `--limit`, and `--paginate`. Typed subtask creation is one request and does not implicitly inherit projects or an assignee.
 
 ## Conventions
 
@@ -65,7 +69,7 @@ The separate MCP `create_task` and `comment_task` tools remain plain-text-only a
   - `dharma api` is the exception: on success it passes Asana's raw response through unchanged (no envelope, always JSON — it ignores `--output toon`). On failure it still returns the `{ok:false,error:{...}}` envelope and the exit codes below — only the success path is raw.
   - `--output toon` is an experimental compact format (~35% smaller on flat lists like my-tasks/project list; ~0% on nested data). Default is `json`; keep `json` when piping to `jq`, since `.data[]` doesn't work on TOON.
 - **Exit codes**: `0` success · `1` API/operational error · `2` auth (missing or rejected token) · `3` usage error (bad flags or arguments). Branch on the exit code rather than scraping text.
-- **Not idempotent**: `task create` and `task comment` POST new objects and Asana has no dedupe key — if a call times out, verify with `task search` / `task stories` before retrying, or you may create a duplicate.
+- **Not idempotent**: `task create`, `task subtask create`, and `task comment` POST new objects and Asana has no dedupe key — if a call times out, verify with `task search`, `task subtask list`, or `task stories` before retrying, or you may create a duplicate.
 - Asana gids are opaque strings — never invent one; get them from list/search output.
 - **Fields**: list/get commands send a curated `--fields` set by default (small but useful). Override with `--fields a,b,c`, or `--fields ""` for Asana's raw representation. Caveat: **Asana silently ignores unknown/misspelled opt_fields** — a typo yields a bare `{"gid": ...}` with no error, so if an expected field is missing, check the spelling.
 - The default workspace comes from the bundled config; override with `--workspace <gid>` if needed.

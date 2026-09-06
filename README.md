@@ -47,6 +47,10 @@ dharma task list --assignee me --modified-since '2026-07-06T00:00:00Z' --complet
 dharma task get <gid> --fields name,assignee.name
 dharma task create --name "Do the thing" --project 1234567890 --assignee me
 dharma task create --name "Formatted" --html-notes @description.html
+dharma task subtask list <parent-gid> --paginate
+dharma task subtask create <parent-gid> --name "Investigate" --assignee me
+dharma task subtask create <parent-gid> --name "Formatted child" --html-notes @description.html
+dharma task set-parent <task-gid> --parent <parent-gid>   # or: --clear
 dharma task comment <gid> --text "See https://app.asana.com/0/0/<other-gid>"
 dharma task comment <gid> --html-text @comment.html
 dharma task move <gid> --section <section-gid>
@@ -100,6 +104,14 @@ by the MCP tools.
 support completion, assignee, project, section, or modification filters. The MCP
 wrappers do not expose typed tag tools, but all three tag endpoints remain
 available through their existing `asana_api` passthrough.
+
+`task subtask list` returns direct children, including completed tasks, in
+Asana's order and supports the standard `--fields`, `--limit`, and `--paginate`
+options. `task subtask create` creates the child in one request; it does not
+resolve a workspace or implicitly inherit projects or an assignee. Use
+`task set-parent` to change or clear an existing task's parent. These typed
+commands are CLI-only; MCP clients can use the existing `asana_api` tool for
+subtask and parent operations.
 
 `project get` looks up a project directly by GID, so it does not need a workspace. It requests the compact `name,archived,permalink_url` projection by default; pass `--fields` to replace it, or `--fields ""` to use Asana's raw default representation.
 
