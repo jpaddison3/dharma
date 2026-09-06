@@ -232,9 +232,19 @@ func TestArgvBuilders(t *testing.T) {
 			return s.createTask(ctx, nil, createTaskArgs{Name: "write memo", Notes: "by friday", ProjectGID: "42"})
 		}, []string{"task", "create", "--name", "write memo", "--notes", "by friday", "--project", "42"}},
 
+		// MCP plain-text fields stay literal argv values. Typed CLI HTML inputs
+		// must not make the MCP shim reinterpret an @-prefix as a file/stdin source.
+		{"create_task keeps @ notes literal", func() (*mcp.CallToolResult, any, error) {
+			return s.createTask(ctx, nil, createTaskArgs{Name: "write memo", Notes: "@description.html", ProjectGID: "42"})
+		}, []string{"task", "create", "--name", "write memo", "--notes", "@description.html", "--project", "42"}},
+
 		{"comment_task", func() (*mcp.CallToolResult, any, error) {
 			return s.commentTask(ctx, nil, commentTaskArgs{TaskGID: "7", Text: "-- looks good"})
 		}, []string{"task", "comment", "--text", "-- looks good", "--", "7"}},
+
+		{"comment_task keeps @ text literal", func() (*mcp.CallToolResult, any, error) {
+			return s.commentTask(ctx, nil, commentTaskArgs{TaskGID: "7", Text: "@-"})
+		}, []string{"task", "comment", "--text", "@-", "--", "7"}},
 
 		{"complete_task", func() (*mcp.CallToolResult, any, error) {
 			return s.completeTask(ctx, nil, completeTaskArgs{TaskGID: "7"})

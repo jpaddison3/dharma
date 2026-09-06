@@ -288,27 +288,43 @@ func extractNames(v interface{}) []string {
 }
 
 var (
-	taskCreateName     string
-	taskCreateProjects []string
-	taskCreateNotes    string
-	taskCreateAssignee string
+	taskCreateName      string
+	taskCreateProjects  []string
+	taskCreateNotes     string
+	taskCreateHTMLNotes string
+	taskCreateAssignee  string
 )
 
 var taskCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a task",
-	Long: `Create a task. --notes is plain text only, so markup is shown literally.
-For a formatted description, use dharma api with html_notes; see
-dharma api --help.`,
+	Long: `Create a task with an optional plain-text or rich-text description.
+Use --notes for literal plain text, or --html-notes for Asana rich text; the
+flags are mutually exclusive. Rich text accepts literal markup, @path, or @-
+for stdin. File/stdin input has exactly one final LF removed and must be a
+non-empty, balanced XML fragment wrapped in <body>...</body>. Use <body></body>
+for an empty formatted description. See dharma api --help for supported markup
+and mention links.
+
+Examples:
+  dharma task create --name "Do the thing" --notes "Plain description"
+  dharma task create --name "Do the thing" --html-notes @description.html`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if taskCreateName == "" {
+			return usageErrorf("--name is required")
+		}
+		body, err := buildTaskCreateBody(
+			taskCreateName, taskCreateNotes, taskCreateHTMLNotes, taskCreateAssignee,
+			cmd.Flags().Changed("notes"), cmd.Flags().Changed("html-notes"),
+			cmd.ErrOrStderr(),
+		)
+		if err != nil {
+			return err
+		}
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		if taskCreateName == "" {
-			return usageErrorf("--name is required")
-		}
-		body := map[string]interface{}{"name": taskCreateName}
 		if len(taskCreateProjects) > 0 {
 			body["projects"] = taskCreateProjects
 		} else {
@@ -318,17 +334,14 @@ dharma api --help.`,
 			}
 			body["workspace"] = ws
 		}
-		if taskCreateNotes != "" {
-			body["notes"] = taskCreateNotes
-		}
-		if taskCreateAssignee != "" {
-			body["assignee"] = taskCreateAssignee
-		}
 		return runPost(context.Background(), c, "/tasks", body)
 	},
 }
 
-var taskCommentText string
+var (
+	taskCommentText     string
+	taskCommentHTMLText string
+)
 
 // resolveCommentText returns the comment body: the --text value when the flag
 // was set, otherwise stdin with one trailing newline stripped (so a piped file
@@ -361,27 +374,44 @@ dharma task comment 1234567890 <<'DHARMA_EOF'
 Comment text goes here — quotes, apostrophes, newlines all fine.
 DHARMA_EOF
 
---text still works for short one-liners. Comment text is plain text only, so
-markup is shown literally. For a formatted comment, use dharma api with
-html_text; see dharma api --help.`,
+--text still works for short, literal plain-text one-liners. For rich text, use
+--html-text with literal markup, @path, or @- for stdin. --text and --html-text
+are mutually exclusive. Rich text must be non-empty, balanced XML wrapped in
+<body>...</body>; file/stdin input has exactly one final LF removed. See
+dharma api --help for supported markup, mention links, and validation caveats.
+
+Formatted example:
+  dharma task comment 1234567890 --html-text @comment.html`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		changed := cmd.Flags().Changed("text")
-		if !changed && isInteractive(os.Stdin) {
-			fmt.Fprintln(os.Stderr, "reading comment text from stdin — pipe text or type, then Ctrl-D")
+		plainPresent := cmd.Flags().Changed("text")
+		htmlPresent := cmd.Flags().Changed("html-text")
+		var field, value string
+		var err error
+		if plainPresent || htmlPresent {
+			field, value, _, err = selectTaskTextField(
+				"text", "html_text", taskCommentText, taskCommentHTMLText,
+				plainPresent, htmlPresent, true, cmd.ErrOrStderr(),
+			)
+		} else {
+			if isInteractive(os.Stdin) {
+				fmt.Fprintln(cmd.ErrOrStderr(), "reading comment text from stdin — pipe text or type, then Ctrl-D")
+			}
+			value, err = resolveCommentText(taskCommentText, false)
+			field = "text"
 		}
-		text, err := resolveCommentText(taskCommentText, changed)
 		if err != nil {
 			return err
 		}
-		if text == "" {
+		if value == "" {
 			return usageErrorf("comment text is empty")
 		}
+		body := map[string]interface{}{field: value}
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		return runPost(context.Background(), c, "/tasks/"+args[0]+"/stories", map[string]interface{}{"text": text})
+		return runPost(context.Background(), c, "/tasks/"+args[0]+"/stories", body)
 	},
 }
 
@@ -593,25 +623,40 @@ var taskAssignCmd = &cobra.Command{
 	},
 }
 
-var taskSetNotesText string
+var (
+	taskSetNotesText string
+	taskSetHTMLNotes string
+)
 
 var taskSetNotesCmd = &cobra.Command{
 	Use:   "set-notes <gid>",
 	Short: "Set a task's description (notes)",
-	Long: `Set a task's description. Pass --notes "" to clear. Notes are plain
-text only, so markup is shown literally. This replaces the whole description
-and drops existing formatting. For a formatted description, use dharma api
-with html_notes; see dharma api --help.`,
+	Long: `Replace a task's whole description. Use --notes for literal plain text
+(pass --notes "" to clear), or --html-notes for Asana rich text; the flags are
+mutually exclusive. Rich text accepts literal markup, @path, or @- for stdin,
+with exactly one final LF removed from file/stdin input. It must be non-empty,
+balanced XML wrapped in <body>...</body>; use <body></body> for an empty rich
+description. See dharma api --help for supported markup and mention links.
+
+Examples:
+  dharma task set-notes 1234567890 --notes "Plain description"
+  dharma task set-notes 1234567890 --html-notes @- < description.html`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !cmd.Flags().Changed("notes") {
-			return usageErrorf("--notes is required (pass \"\" to clear)")
+		field, value, _, err := selectTaskTextField(
+			"notes", "html_notes", taskSetNotesText, taskSetHTMLNotes,
+			cmd.Flags().Changed("notes"), cmd.Flags().Changed("html-notes"),
+			true, cmd.ErrOrStderr(),
+		)
+		if err != nil {
+			return err
 		}
+		body := map[string]interface{}{field: value}
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		return runPut(context.Background(), c, "/tasks/"+args[0], map[string]interface{}{"notes": taskSetNotesText})
+		return runPut(context.Background(), c, "/tasks/"+args[0], body)
 	},
 }
 
@@ -801,10 +846,12 @@ func init() {
 
 	taskCreateCmd.Flags().StringVar(&taskCreateName, "name", "", "task name (required)")
 	taskCreateCmd.Flags().StringArrayVar(&taskCreateProjects, "project", nil, "project gid (repeatable)")
-	taskCreateCmd.Flags().StringVar(&taskCreateNotes, "notes", "", "plain-text task description")
+	taskCreateCmd.Flags().StringVar(&taskCreateNotes, "notes", "", "literal plain-text task description (mutually exclusive with --html-notes)")
+	taskCreateCmd.Flags().StringVar(&taskCreateHTMLNotes, "html-notes", "", "Asana rich-text description: literal HTML, @path, or @- (mutually exclusive with --notes)")
 	taskCreateCmd.Flags().StringVar(&taskCreateAssignee, "assignee", "", "assignee gid")
 
-	taskCommentCmd.Flags().StringVar(&taskCommentText, "text", "", "comment text (default: read from stdin; URLs are auto-linked by Asana)")
+	taskCommentCmd.Flags().StringVar(&taskCommentText, "text", "", "literal plain-text comment (default: read from stdin; mutually exclusive with --html-text)")
+	taskCommentCmd.Flags().StringVar(&taskCommentHTMLText, "html-text", "", "Asana rich-text comment: literal HTML, @path, or @- (mutually exclusive with --text)")
 
 	taskMoveCmd.Flags().StringVar(&taskMoveSection, "section", "", "destination section gid")
 	taskMoveCmd.Flags().StringVar(&taskMoveBefore, "before", "", "place before this task gid in the destination section")
@@ -825,7 +872,8 @@ func init() {
 	taskAssignCmd.Flags().StringVar(&taskAssignTo, "to", "", "assignee user gid, or 'me'")
 	taskAssignCmd.Flags().BoolVar(&taskAssignClear, "clear", false, "unassign the task")
 
-	taskSetNotesCmd.Flags().StringVar(&taskSetNotesText, "notes", "", "new plain-text description (pass \"\" to clear)")
+	taskSetNotesCmd.Flags().StringVar(&taskSetNotesText, "notes", "", "new literal plain-text description (pass \"\" to clear; mutually exclusive with --html-notes)")
+	taskSetNotesCmd.Flags().StringVar(&taskSetHTMLNotes, "html-notes", "", "new Asana rich-text description: literal HTML, @path, or @- (mutually exclusive with --notes)")
 
 	taskSearchCmd.Flags().StringVar(&taskSearchText, "text", "", "match name/description")
 	taskSearchCmd.Flags().StringVar(&taskSearchAssignee, "assignee", "", "user gid or 'me'")

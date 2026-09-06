@@ -59,11 +59,14 @@ DHARMA_EOF
 
 Rich text (html_notes / html_text)
 
-Rich text is available through dharma api; the typed task commands use plain
-text. Follow these rules when sending html_notes or html_text:
+The typed task create/set-notes/comment commands accept rich text through
+--html-notes/--html-text; dharma api remains available for other endpoints.
+Follow these rules when sending html_notes or html_text:
 
   - Wrap the entire value in <body>...</body>. Without it, Asana returns 400
-    "Rich text should be wrapped in <body> tag."
+    "Rich text should be wrapped in <body> tag." Use <body></body> for an
+    empty formatted description; an empty HTML flag value is rejected locally.
+    Markup must be balanced XML.
   - In text, escape < and > as &lt; and &gt;. A bare & is tolerated and
     auto-escaped, but &amp; is the safe form.
   - Only the XML five named entities are reliable: &amp; &lt; &gt; &quot;
@@ -71,10 +74,11 @@ text. Follow these rules when sending html_notes or html_text:
     but &rarr; is stored literally. Numeric references such as &#x27;, &#39;,
     and &#8212; are never decoded and appear literally. Write apostrophes,
     quotes, dashes, arrows, and other characters as literal UTF-8.
-  - Allowed tags are h1 h2 strong em u s code pre blockquote ol ul li a hr
-    table tr td. <a> requires href. Tags p, br, div, and span, plus HTML
-    comments, are rejected in task descriptions. Use literal newlines inside
-    <body> for line breaks.
+  - Tags observed to work in task descriptions: h1 h2 strong em u s code pre
+    blockquote ol ul li a hr table tr td. <a> requires href. Tags p, br, div,
+    and span, plus HTML comments, are rejected in task descriptions. Use
+    literal newlines inside <body> for line breaks. Supported markup varies by
+    object; see https://developers.asana.com/docs/rich-text.
   - <a data-asana-gid="GID"/> expands to an @-mention for a user gid or a
     titled task link for a task gid, in descriptions and comments.
   - Do not send notes with html_notes, or text with html_text. Asana does not
@@ -85,9 +89,18 @@ text. Follow these rules when sending html_notes or html_text:
   - Reading rich text requires explicit fields: task get --fields html_notes,
     or task stories --fields html_text,created_at. Defaults return plain
     notes/text.
-  - task create --notes, task set-notes, and task comment are plain text, so
-    markup is shown literally. set-notes replaces the whole description and
-    drops existing formatting.
+  - Typed HTML flags accept literal markup, @path, or @- for stdin. Expansion
+    happens once; file/stdin content is not reinterpreted, and exactly one final
+    LF is removed. Bare '-' is literal. Plain --notes/--text values never expand
+    a leading '@' and HTML-looking plain text is sent literally.
+  - --notes/--html-notes and --text/--html-text are mutually exclusive.
+    set-notes replaces the whole description, regardless of the chosen format.
+
+Typed command examples:
+
+dharma task create --name "Plan" --html-notes @description.html
+dharma task set-notes 123 --html-notes @- < description.html
+dharma task comment 123 --html-text @comment.html
 
 Write a formatted task description from stdin:
 
