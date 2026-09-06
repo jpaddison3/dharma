@@ -38,6 +38,8 @@ dharma task get <gid> --fields name,assignee.name
 dharma task create --name "Do the thing" --project 1234567890 --assignee me
 dharma task comment <gid> --text "See https://app.asana.com/0/0/<other-gid>"
 dharma task move <gid> --section <section-gid>
+dharma task move <gid> --section <section-gid> --before <task-gid>
+dharma task move <gid> --section <section-gid> --after <task-gid>
 dharma task rename <gid> --name "New name"
 dharma task complete <gid>
 dharma task set-due <gid> --due 2026-06-15        # or: today, tomorrow, or ISO datetime

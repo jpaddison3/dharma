@@ -358,21 +358,46 @@ html_text; see dharma api --help.`,
 	},
 }
 
-var taskMoveSection string
+var (
+	taskMoveSection string
+	taskMoveBefore  string
+	taskMoveAfter   string
+)
 
 var taskMoveCmd = &cobra.Command{
 	Use:   "move <gid>",
 	Short: "Move a task into a section (within whichever project that section belongs to)",
-	Args:  cobra.ExactArgs(1),
+	Long: `Move a task into a destination section. Use --before or --after to place
+the task relative to an anchor task in that section; the flags are mutually
+exclusive. Without an anchor, Asana places the task at the top of the section.
+Asana validates anchor membership, permissions, and self-placement.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if taskMoveSection == "" {
 			return usageErrorf("--section is required (a section gid)")
+		}
+		beforeChanged := cmd.Flags().Changed("before")
+		afterChanged := cmd.Flags().Changed("after")
+		if beforeChanged && afterChanged {
+			return usageErrorf("--before and --after are mutually exclusive")
+		}
+		if beforeChanged && taskMoveBefore == "" {
+			return usageErrorf("--before must not be empty")
+		}
+		if afterChanged && taskMoveAfter == "" {
+			return usageErrorf("--after must not be empty")
 		}
 		c, err := newClient()
 		if err != nil {
 			return err
 		}
-		return runPost(context.Background(), c, "/sections/"+taskMoveSection+"/addTask", map[string]interface{}{"task": args[0]})
+		body := map[string]interface{}{"task": args[0]}
+		if beforeChanged {
+			body["insert_before"] = taskMoveBefore
+		} else if afterChanged {
+			body["insert_after"] = taskMoveAfter
+		}
+		return runPost(context.Background(), c, "/sections/"+taskMoveSection+"/addTask", body)
 	},
 }
 
@@ -713,6 +738,8 @@ func init() {
 	taskCommentCmd.Flags().StringVar(&taskCommentText, "text", "", "comment text (default: read from stdin; URLs are auto-linked by Asana)")
 
 	taskMoveCmd.Flags().StringVar(&taskMoveSection, "section", "", "destination section gid")
+	taskMoveCmd.Flags().StringVar(&taskMoveBefore, "before", "", "place before this task gid in the destination section")
+	taskMoveCmd.Flags().StringVar(&taskMoveAfter, "after", "", "place after this task gid in the destination section")
 
 	taskAddToProjectCmd.Flags().StringVar(&taskAddToProjectProject, "project", "", "project gid (required)")
 	taskAddToProjectCmd.Flags().StringVar(&taskAddToProjectSection, "section", "", "section gid within the project (optional)")
