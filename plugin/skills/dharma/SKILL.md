@@ -33,10 +33,13 @@ If `CLAUDE_PLUGIN_ROOT` is unset, the plugin root is two directories above this 
 "$DHARMA" task search --text "keyword" --completed=false --fields name
 "$DHARMA" task get <gid> --fields name,notes,assignee.name
 "$DHARMA" task create --name "Do the thing" --project <gid> --assignee me
+"$DHARMA" task create --name "Formatted" --html-notes @description.html
 # Comment text is read from stdin (quotes/apostrophes/newlines need no
 # escaping). For arbitrary or untrusted text, write it to a file and redirect —
 # no shell escaping, and nothing to collide with a heredoc delimiter:
 "$DHARMA" task comment <gid> < comment.txt
+"$DHARMA" task comment <gid> --html-text @comment.html
+"$DHARMA" task set-notes <gid> --html-notes @- < description.html
 ```
 
 For endpoints without a typed command, `dharma api` works like `gh api` (`"$DHARMA" api --help` documents the `-f`/`--body` semantics):
@@ -46,8 +49,11 @@ For endpoints without a typed command, `dharma api` works like `gh api` (`"$DHAR
 "$DHARMA" api -X POST /tasks -f name=Foo -f projects=<gid>
 ```
 
-For rich text via `html_notes` / `html_text`, wrap the value in `<body>`, escape only `& < >`, and use literal UTF-8—not numeric character references. Do not use `<p>` or `<br>`.
-The typed `--notes`, `set-notes`, and `comment` paths are plain text. See `"$DHARMA" api --help` for the authoritative rules, allowed tags, and examples.
+Typed task writes accept literal plain text through `--notes`/`--text` or Asana rich text through `--html-notes`/`--html-text`; each pair is mutually exclusive. HTML values accept literal markup, `@path`, or `@-` for stdin. Expansion happens once, file/stdin content is not reinterpreted, and exactly one final LF is removed; bare `-` is literal. Plain values never expand a leading `@`.
+
+Wrap rich text in balanced `<body>...</body>` XML. Use `<body></body>` for an empty formatted description, literal UTF-8 rather than numeric references, and `<a data-asana-gid="GID"/>` for Asana mentions. `task set-notes` replaces the whole description. Supported markup varies by object; see [Asana's rich-text documentation](https://developers.asana.com/docs/rich-text). Observed task descriptions also support tables but reject `p`, `br`, `div`, `span`, and HTML comments. Invalid story HTML may appear as raw text despite HTTP success, so inspect returned `text`. See `"$DHARMA" api --help` for the authoritative CLI rules.
+
+The separate MCP `create_task` and `comment_task` tools remain plain-text-only and treat `@...` literally; use `asana_api` for rich text through MCP.
 
 ## Conventions
 
