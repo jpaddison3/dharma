@@ -36,7 +36,9 @@ dharma project list --workspace 1234567890
 dharma task list --project 1234567890 --fields name,assignee.name,due_on
 dharma task get <gid> --fields name,assignee.name
 dharma task create --name "Do the thing" --project 1234567890 --assignee me
+dharma task create --name "Formatted" --html-notes @description.html
 dharma task comment <gid> --text "See https://app.asana.com/0/0/<other-gid>"
+dharma task comment <gid> --html-text @comment.html
 dharma task move <gid> --section <section-gid>
 dharma task rename <gid> --name "New name"
 dharma task complete <gid>
@@ -44,6 +46,7 @@ dharma task set-due <gid> --due 2026-06-15        # or: today, tomorrow, or ISO 
 dharma task set-due <gid> --clear
 dharma task assign <gid> --to me                  # or a user gid; --clear to unassign
 dharma task set-notes <gid> --notes "..."         # pass "" to clear
+dharma task set-notes <gid> --html-notes @- < description.html
 dharma task search --text "MINERVA" --completed=false --fields name
 dharma task stories <gid> --fields type,text,created_at,created_by.name
 
@@ -105,8 +108,23 @@ List and `get` commands send a curated `--fields` (opt_fields) set by default �
 
 `-f key=value` becomes a **query parameter** on GET/DELETE/HEAD and a **JSON body field** (wrapped in Asana's `{"data": ...}` envelope) on POST/PUT/PATCH. `--body` passes raw JSON through unchanged.
 
-For rich text via `html_notes` / `html_text`, wrap the value in `<body>`, escape only `& < >`, and use literal UTF-8—not numeric character references. Do not use `<p>` or `<br>`.
-The typed `--notes`, `set-notes`, and `comment` paths are plain text. See `dharma api --help` for the authoritative rules, allowed tags, and examples.
+### Rich-text descriptions and comments
+
+Typed task writes support both literal plain text and Asana rich text:
+
+```sh
+dharma task create --name "Plan" --html-notes @description.html
+dharma task set-notes <gid> --html-notes @- < description.html
+dharma task comment <gid> --html-text @comment.html
+```
+
+`--notes` and `--html-notes` are mutually exclusive, as are `--text` and `--html-text`. Plain values are always literal—even `@handle`, `@-`, and HTML-looking strings. HTML values accept literal markup, `@path`, or `@-` for stdin; expansion happens once, file/stdin content is not reinterpreted, and exactly one final LF is removed. A bare `-` is not a stdin alias.
+
+Wrap rich text in `<body>...</body>` and send balanced XML. An empty resolved HTML value is rejected; use `<body></body>` for an empty formatted description. Use literal UTF-8 rather than numeric character references, and escape text where XML requires it (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`). `<a data-asana-gid="GID"/>` creates an Asana task/user mention. `task set-notes` replaces the whole description in either format.
+
+Supported markup varies by object; see [Asana's rich-text documentation](https://developers.asana.com/docs/rich-text). Observed task-description behavior also supports `table`/`tr`/`td`, while `p`, `br`, `div`, `span`, and HTML comments are rejected there; use literal newlines for line breaks. Invalid story HTML can appear as raw visible text despite an HTTP success, so inspect the returned `text`. `dharma api --help` remains the authoritative in-CLI reference and covers raw API writes.
+
+MCP `create_task` and `comment_task` deliberately remain plain-text tools with literal values and no file-reading behavior. Use their existing `asana_api` tool for MCP rich-text writes.
 
 ### Workspace default
 
