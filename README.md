@@ -45,6 +45,7 @@ dharma task comment <gid> --text "See https://app.asana.com/0/0/<other-gid>"
 dharma task move <gid> --section <section-gid>
 dharma task rename <gid> --name "New name"
 dharma task complete <gid>
+dharma task delete <gid>                            # immediate; no confirmation prompt
 dharma task set-due <gid> --due 2026-06-15        # or: today, tomorrow, or ISO datetime
 dharma task set-due <gid> --clear
 dharma task assign <gid> --to me                  # or a user gid; --clear to unassign
@@ -76,6 +77,10 @@ request and cannot offset-paginate; narrow its filters or use creation-time
 bounds to inspect another window, but do not treat date windows as a guaranteed
 exhaustive cursor. These time and sort options are CLI-only and are not exposed
 by the MCP tools.
+
+### Deleting tasks
+
+`dharma task delete <gid>` immediately sends one deletion request, with no confirmation prompt or automatic retry. Asana's usual `{"data": {}}` response produces `{"ok": true, "data": {}}`; a successful empty response produces `{"ok": true, "data": null}`. Missing or unauthorized tasks fail with a nonzero exit code. After an ambiguous failure such as a timeout or dropped connection, check the task's state before retrying manually.
 
 ### Output
 
