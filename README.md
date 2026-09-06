@@ -34,6 +34,7 @@ dharma workspace list
 dharma project list --workspace 1234567890
 
 dharma task list --project 1234567890 --fields name,assignee.name,due_on
+dharma task list --assignee me --modified-since '2026-07-06T00:00:00Z' --completed-since '2026-07-06T00:00:00Z' --paginate
 dharma task get <gid> --fields name,assignee.name
 dharma task create --name "Do the thing" --project 1234567890 --assignee me
 dharma task comment <gid> --text "See https://app.asana.com/0/0/<other-gid>"
@@ -45,6 +46,7 @@ dharma task set-due <gid> --clear
 dharma task assign <gid> --to me                  # or a user gid; --clear to unassign
 dharma task set-notes <gid> --notes "..."         # pass "" to clear
 dharma task search --text "MINERVA" --completed=false --fields name
+dharma task search --created-after '2026-07-06T00:00:00Z' --created-before '2026-09-06T00:00:00Z' --sort-by created_at --sort-ascending
 dharma task stories <gid> --fields type,text,created_at,created_by.name
 
 # attachments
@@ -63,6 +65,13 @@ dharma api -X POST /tasks -f name=Foo -f projects=1234567890
 dharma api /workspaces/123/tasks --paginate
 dharma api -X PUT /tasks/123 --body '{"data": {"completed": true}}'
 ```
+
+`task list` supports normal Asana offset pagination, so `--paginate` follows all
+pages while retaining its selector and time cutoffs. `task search` makes one
+request and cannot offset-paginate; narrow its filters or use creation-time
+bounds to inspect another window, but do not treat date windows as a guaranteed
+exhaustive cursor. These time and sort options are CLI-only and are not exposed
+by the MCP tools.
 
 ### Output
 

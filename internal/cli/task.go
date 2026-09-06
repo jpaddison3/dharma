@@ -31,19 +31,41 @@ const (
 )
 
 var (
-	taskListAssignee   string
-	taskListProject    string
-	taskListSection    string
-	taskListLimit      int
-	taskListFields     string
-	taskListPaginate   bool
-	taskListIncomplete bool
+	taskListAssignee       string
+	taskListProject        string
+	taskListSection        string
+	taskListModifiedSince  string
+	taskListCompletedSince string
+	taskListLimit          int
+	taskListFields         string
+	taskListPaginate       bool
+	taskListIncomplete     bool
 )
 
 var taskListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List tasks (requires --section, --project, or --assignee)",
+	Long: `List tasks selected by section, project, or assignee.
+
+--modified-since maps to Asana's modified_since parameter. --completed-since
+maps to completed_since and includes incomplete tasks plus tasks completed since
+the cutoff. Both accept RFC3339 timestamps with a timezone; --completed-since
+also accepts "now". --incomplete is shorthand for --completed-since now and
+conflicts with any other explicit --completed-since value.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if cmd.Flags().Changed("modified-since") {
+			if _, err := parseTaskFilterTimestamp("--modified-since", taskListModifiedSince, false); err != nil {
+				return err
+			}
+		}
+		if cmd.Flags().Changed("completed-since") {
+			if _, err := parseTaskFilterTimestamp("--completed-since", taskListCompletedSince, true); err != nil {
+				return err
+			}
+		}
+		if taskListIncomplete && cmd.Flags().Changed("completed-since") && taskListCompletedSince != "now" {
+			return usageErrorf("--incomplete conflicts with --completed-since unless its value is \"now\"")
+		}
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -69,7 +91,12 @@ var taskListCmd = &cobra.Command{
 			q.Set("limit", strconv.Itoa(taskListLimit))
 		}
 		setOptFields(q, taskListFields)
-		if taskListIncomplete {
+		if cmd.Flags().Changed("modified-since") {
+			q.Set("modified_since", taskListModifiedSince)
+		}
+		if cmd.Flags().Changed("completed-since") {
+			q.Set("completed_since", taskListCompletedSince)
+		} else if taskListIncomplete {
 			q.Set("completed_since", "now")
 		}
 		return runList(ctx, c, "/tasks", q, taskListPaginate)
@@ -571,6 +598,10 @@ var (
 	taskSearchSection       string
 	taskSearchTag           string
 	taskSearchModifiedSince string
+	taskSearchCreatedAfter  string
+	taskSearchCreatedBefore string
+	taskSearchSortBy        string
+	taskSearchSortAscending bool
 	taskSearchFields        string
 	taskSearchLimit         int
 )
@@ -580,16 +611,39 @@ var taskSearchCmd = &cobra.Command{
 	Short: "Search tasks across a workspace",
 	Long: `Search tasks across a workspace using Asana's /tasks/search endpoint.
 
-The endpoint returns at most 100 results in a single response and does NOT support
-offset pagination. To page through a longer result set, narrow with the provided
-filters or chunk by modification time: take the oldest result's modified_at value
-and re-run with --modified-since pointing earlier (Asana's parameter is actually
-modified_at.after, so this fetches anything newer than that timestamp — invert
-manually if you need older).
+Creation bounds accept RFC3339 timestamps with a timezone and map to
+created_at.after / created_at.before. When both are supplied, --created-after
+must be earlier than --created-before. --sort-by accepts due_date, created_at,
+completed_at, likes, relevance, or modified_at. Omit sorting options to preserve
+Asana's default order (modified time, descending); --sort-ascending may be used
+with or without --sort-by.
 
-A warning is printed to stderr if the result count equals --limit, since results
-may have been truncated.`,
+The endpoint returns at most 100 results in one response and does not support
+offset pagination. A full result page sets has_more and adds a JSON hint. Narrow
+the filters or use creation-time bounds to inspect another window; date windows
+are not a guaranteed exhaustive pagination cursor.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var createdAfter, createdBefore time.Time
+		if cmd.Flags().Changed("created-after") {
+			parsed, err := parseTaskFilterTimestamp("--created-after", taskSearchCreatedAfter, false)
+			if err != nil {
+				return err
+			}
+			createdAfter = parsed
+		}
+		if cmd.Flags().Changed("created-before") {
+			parsed, err := parseTaskFilterTimestamp("--created-before", taskSearchCreatedBefore, false)
+			if err != nil {
+				return err
+			}
+			createdBefore = parsed
+		}
+		if cmd.Flags().Changed("created-after") && cmd.Flags().Changed("created-before") && !createdAfter.Before(createdBefore) {
+			return usageErrorf("--created-after must be earlier than --created-before")
+		}
+		if cmd.Flags().Changed("sort-by") && !validTaskSearchSort(taskSearchSortBy) {
+			return usageErrorf("--sort-by must be one of due_date, created_at, completed_at, likes, relevance, or modified_at; got %q", taskSearchSortBy)
+		}
 		c, err := newClient()
 		if err != nil {
 			return err
@@ -625,6 +679,18 @@ may have been truncated.`,
 		if taskSearchModifiedSince != "" {
 			q.Set("modified_at.after", taskSearchModifiedSince)
 		}
+		if cmd.Flags().Changed("created-after") {
+			q.Set("created_at.after", taskSearchCreatedAfter)
+		}
+		if cmd.Flags().Changed("created-before") {
+			q.Set("created_at.before", taskSearchCreatedBefore)
+		}
+		if cmd.Flags().Changed("sort-by") {
+			q.Set("sort_by", taskSearchSortBy)
+		}
+		if cmd.Flags().Changed("sort-ascending") {
+			q.Set("sort_ascending", strconv.FormatBool(taskSearchSortAscending))
+		}
 		setOptFields(q, taskSearchFields)
 		resp, err := c.Do(context.Background(), "GET", "/workspaces/"+ws+"/tasks/search", q, nil)
 		if err != nil {
@@ -638,8 +704,9 @@ may have been truncated.`,
 		hint := ""
 		if hasMore {
 			// The search endpoint has no offset pagination, so a full page
-			// likely means truncation. Point at the one workaround.
-			hint = fmt.Sprintf("hit the %d-result cap and search has no pagination — narrow filters, or take the oldest result's modified_at and rerun with --modified-since <that timestamp> to page by modification time", limit)
+			// likely means truncation. Date windows can narrow the result set,
+			// but are not an exhaustive cursor.
+			hint = fmt.Sprintf("hit the %d-result cap and search has no pagination — narrow filters or use --created-after/--created-before to inspect another window; date windows are not a guaranteed exhaustive cursor", limit)
 		}
 		return output.PrintList(os.Stdout, results, hasMore, hint)
 	},
@@ -696,6 +763,8 @@ func init() {
 	taskListCmd.Flags().StringVar(&taskListAssignee, "assignee", "", "assignee gid (use 'me' for self)")
 	taskListCmd.Flags().StringVar(&taskListProject, "project", "", "project gid")
 	taskListCmd.Flags().StringVar(&taskListSection, "section", "", "section gid")
+	taskListCmd.Flags().StringVar(&taskListModifiedSince, "modified-since", "", "RFC3339 timestamp; maps to modified_since")
+	taskListCmd.Flags().StringVar(&taskListCompletedSince, "completed-since", "", "RFC3339 timestamp or 'now'; includes incomplete tasks and maps to completed_since")
 	taskListCmd.Flags().IntVar(&taskListLimit, "limit", 0, "max items per page (server default if 0)")
 	addFieldsFlag(taskListCmd, &taskListFields, defaultTaskListFields)
 	taskListCmd.Flags().BoolVar(&taskListPaginate, "paginate", false, "fetch all pages")
@@ -738,6 +807,10 @@ func init() {
 	taskSearchCmd.Flags().StringVar(&taskSearchSection, "section", "", "section gid")
 	taskSearchCmd.Flags().StringVar(&taskSearchTag, "tag", "", "tag gid")
 	taskSearchCmd.Flags().StringVar(&taskSearchModifiedSince, "modified-since", "", "ISO 8601 datetime; maps to modified_at.after")
+	taskSearchCmd.Flags().StringVar(&taskSearchCreatedAfter, "created-after", "", "RFC3339 timestamp; maps to created_at.after")
+	taskSearchCmd.Flags().StringVar(&taskSearchCreatedBefore, "created-before", "", "RFC3339 timestamp; maps to created_at.before")
+	taskSearchCmd.Flags().StringVar(&taskSearchSortBy, "sort-by", "", "sort by due_date, created_at, completed_at, likes, relevance, or modified_at (default: modified time)")
+	taskSearchCmd.Flags().BoolVar(&taskSearchSortAscending, "sort-ascending", false, "sort ascending (default: descending; sent only when specified)")
 	addFieldsFlag(taskSearchCmd, &taskSearchFields, defaultTaskListFields)
 	taskSearchCmd.Flags().IntVar(&taskSearchLimit, "limit", 0, "max results (1-100, default 100)")
 
