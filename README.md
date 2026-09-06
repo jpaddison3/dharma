@@ -53,6 +53,14 @@ dharma task search --text "MINERVA" --completed=false --fields name
 dharma task search --created-after '2026-07-06T00:00:00Z' --created-before '2026-09-06T00:00:00Z' --sort-by created_at --sort-ascending
 dharma task stories <gid> --fields type,text,created_at,created_by.name
 
+# tags
+dharma tag list                                           # list tags in the workspace
+dharma tag list --name "priority"                         # fuzzy-find a tag
+dharma tag get <tag-gid>                                  # fetch its name and color
+dharma tag tasks <tag-gid> --fields name,tags.gid --paginate
+dharma task add-tag <task-gid> --tag <tag-gid>
+dharma task remove-tag <task-gid> --tag <tag-gid>         # removes the association, not the tag
+
 # attachments
 dharma attachment download <gid> --output-file ./screenshot.png
 dharma attachment download <gid> --output-dir ./downloads        # uses attachment name
@@ -76,6 +84,11 @@ request and cannot offset-paginate; narrow its filters or use creation-time
 bounds to inspect another window, but do not treat date windows as a guaranteed
 exhaustive cursor. These time and sort options are CLI-only and are not exposed
 by the MCP tools.
+
+`tag tasks` returns all tasks associated with the tag; Asana's endpoint does not
+support completion, assignee, project, section, or modification filters. The MCP
+wrappers do not expose typed tag tools, but all three tag endpoints remain
+available through their existing `asana_api` passthrough.
 
 ### Output
 
