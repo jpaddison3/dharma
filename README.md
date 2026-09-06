@@ -33,6 +33,10 @@ dharma user me
 dharma workspace list
 dharma project list --workspace 1234567890
 
+dharma section list --project 1234567890
+dharma section get <gid>
+dharma section get <gid> --fields name,project.name
+
 dharma task list --project 1234567890 --fields name,assignee.name,due_on
 dharma task list --assignee me --modified-since '2026-07-06T00:00:00Z' --completed-since '2026-07-06T00:00:00Z' --paginate
 dharma task get <gid> --fields name,assignee.name
