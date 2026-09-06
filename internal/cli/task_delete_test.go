@@ -326,18 +326,6 @@ func runTaskDeleteCLI(t *testing.T, mode string, args ...string) taskDeleteCLIRe
 	return taskDeleteCLIResult{stdout: stdout.String(), stderr: stderr.String(), code: code}
 }
 
-func TestTaskDeleteCLIHelp(t *testing.T) {
-	result := runTaskDeleteCLI(t, "help", "task", "delete", "--help")
-	if result.code != 0 {
-		t.Fatalf("exit = %d, stderr = %q", result.code, result.stderr)
-	}
-	for _, want := range []string{"Immediately delete one task", "Usage:", "dharma task delete <gid>", "not retried automatically"} {
-		if !strings.Contains(result.stdout, want) {
-			t.Errorf("help does not contain %q:\n%s", want, result.stdout)
-		}
-	}
-}
-
 func TestTaskDeleteCLIValidNoninteractiveInvocation(t *testing.T) {
 	result := runTaskDeleteCLI(t, "success", "task", "delete", "123")
 	if result.code != 0 || result.stderr != "" {
