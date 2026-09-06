@@ -74,11 +74,11 @@ Follow these rules when sending html_notes or html_text:
     but &rarr; is stored literally. Numeric references such as &#x27;, &#39;,
     and &#8212; are never decoded and appear literally. Write apostrophes,
     quotes, dashes, arrows, and other characters as literal UTF-8.
-  - Asana's object-specific supported markup is documented at
-    https://developers.asana.com/docs/rich-text. Observed task-description
-    support also includes table/tr/td. <a> requires href. Tags p, br, div, and
-    span, plus HTML comments, are rejected in task descriptions. Use literal
-    newlines inside <body> for line breaks.
+  - Tags observed to work in task descriptions: h1 h2 strong em u s code pre
+    blockquote ol ul li a hr table tr td. <a> requires href. Tags p, br, div,
+    and span, plus HTML comments, are rejected in task descriptions. Use
+    literal newlines inside <body> for line breaks. Supported markup varies by
+    object; see https://developers.asana.com/docs/rich-text.
   - <a data-asana-gid="GID"/> expands to an @-mention for a user gid or a
     titled task link for a task gid, in descriptions and comments.
   - Do not send notes with html_notes, or text with html_text. Asana does not

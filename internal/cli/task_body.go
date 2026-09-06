@@ -41,8 +41,9 @@ func selectTaskTextField(
 	return htmlField, resolved, true, nil
 }
 
-// buildTaskCreateBody builds the fields shared by root tasks and subtasks.
-// Root-only project/workspace placement is deliberately added by the caller.
+// buildTaskCreateBody builds the description/assignee fields for task create.
+// Project/workspace placement is added by the caller, which may need an API
+// call to discover the workspace.
 func buildTaskCreateBody(
 	name, notes, htmlNotes, assignee string,
 	notesPresent, htmlNotesPresent bool,
