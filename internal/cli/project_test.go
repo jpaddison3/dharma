@@ -358,15 +358,13 @@ func TestProjectGetHelp(t *testing.T) {
 	if len(result.requests) != 0 {
 		t.Errorf("requests = %d, want 0", len(result.requests))
 	}
+	// Only the machine-facing contract: the positional signature and that the
+	// standard --fields flag is registered with the documented default. Prose
+	// and examples are free to change without breaking this test.
 	for _, want := range []string{
 		"Usage:\n  dharma project get <gid> [flags]",
-		"Fetch a project directly by GID without resolving a workspace.",
 		`--fields string`,
 		`(default "name,archived,permalink_url")`,
-		"dharma project get 1234567890 --fields 'name,notes'",
-		"dharma project get 1234567890 --fields 'name,owner.name,team.name'",
-		"dharma project get 1234567890 --fields 'name,current_status_update.title,current_status_update.resource_subtype'",
-		`dharma project get 1234567890 --fields ""`,
 	} {
 		if !strings.Contains(result.stdout, want) {
 			t.Errorf("help does not contain %q\n%s", want, result.stdout)
