@@ -32,6 +32,11 @@ Or skip the config file: `ASANA_TOKEN=... dharma user me`.
 dharma user me
 dharma workspace list
 dharma project list --workspace 1234567890
+dharma project get 1234567890
+dharma project get 1234567890 --fields 'name,notes'
+dharma project get 1234567890 --fields 'name,owner.name,team.name'
+dharma project get 1234567890 --fields 'name,current_status_update.title,current_status_update.resource_subtype'
+dharma project get 1234567890 --fields ""
 
 dharma section list --project 1234567890
 dharma section get <gid>
@@ -76,6 +81,8 @@ request and cannot offset-paginate; narrow its filters or use creation-time
 bounds to inspect another window, but do not treat date windows as a guaranteed
 exhaustive cursor. These time and sort options are CLI-only and are not exposed
 by the MCP tools.
+
+`project get` looks up a project directly by GID, so it does not need a workspace. It requests the compact `name,archived,permalink_url` projection by default; pass `--fields` to replace it, or `--fields ""` to use Asana's raw default representation.
 
 ### Output
 
