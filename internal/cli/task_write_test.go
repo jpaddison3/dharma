@@ -16,10 +16,6 @@ import (
 	"github.com/spf13/pflag"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
-
 type taskWriteRequest struct {
 	method string
 	path   string

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"net/url"
+	"strconv"
 
 	"github.com/spf13/cobra"
 )
@@ -74,6 +75,61 @@ var tagCreateCmd = &cobra.Command{
 	},
 }
 
+var tagGetFields string
+
+var tagGetCmd = &cobra.Command{
+	Use:   "get <gid>",
+	Short: "Fetch a tag",
+	Long:  `Fetch a tag by gid. Use --fields to choose the returned fields.`,
+	Example: `  dharma tag get 1234567890
+  dharma tag get 1234567890 --fields name,color,followers.name`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		q := url.Values{}
+		setOptFields(q, tagGetFields)
+		return runGet(context.Background(), c, "/tags/"+args[0], q)
+	},
+}
+
+var (
+	tagTasksFields   string
+	tagTasksPaginate bool
+	tagTasksLimit    int
+)
+
+var tagTasksCmd = &cobra.Command{
+	Use:   "tasks <gid>",
+	Short: "List every task associated with a tag",
+	Long: `List every task associated with a tag.
+
+Asana's tag-task endpoint does not support completion, modification, assignee,
+project, or section filters, so this command always returns all tasks bearing
+the tag. Use --fields to choose the returned fields and --paginate to follow
+every result page.`,
+	Example: `  dharma tag tasks 1234567890
+  dharma tag tasks 1234567890 --fields name,tags.gid --paginate`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if tagTasksLimit < 0 || tagTasksLimit > 100 {
+			return usageErrorf("--limit must be between 1 and 100, or 0 for the default")
+		}
+		c, err := newClient()
+		if err != nil {
+			return err
+		}
+		q := url.Values{}
+		if tagTasksLimit > 0 {
+			q.Set("limit", strconv.Itoa(tagTasksLimit))
+		}
+		setOptFields(q, tagTasksFields)
+		return runList(context.Background(), c, "/tags/"+args[0]+"/tasks", q, tagTasksPaginate)
+	},
+}
+
 func init() {
 	tagListCmd.Flags().StringVar(&tagListName, "name", "", "fuzzy match against tag names (uses typeahead; max ~20 results)")
 	tagListCmd.Flags().BoolVar(&tagListPaginate, "paginate", false, "fetch all pages (ignored when --name is set)")
@@ -82,5 +138,11 @@ func init() {
 	tagCreateCmd.Flags().StringVar(&tagCreateName, "name", "", "tag name (required)")
 	tagCreateCmd.Flags().StringVar(&tagCreateColor, "color", "", "tag color")
 
-	tagCmd.AddCommand(tagListCmd, tagCreateCmd)
+	addFieldsFlag(tagGetCmd, &tagGetFields, "name,color")
+
+	addFieldsFlag(tagTasksCmd, &tagTasksFields, defaultTaskListFields)
+	tagTasksCmd.Flags().BoolVar(&tagTasksPaginate, "paginate", false, "fetch all pages")
+	tagTasksCmd.Flags().IntVar(&tagTasksLimit, "limit", 0, "max items per page (1-100, default 100)")
+
+	tagCmd.AddCommand(tagListCmd, tagCreateCmd, tagGetCmd, tagTasksCmd)
 }
